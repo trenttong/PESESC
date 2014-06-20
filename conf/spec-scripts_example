@@ -1,0 +1,1 @@
+../../../esesc/conf/spec-scripts.rb -e cromom@soe.ucsc.edu -m smartsmode -d /mada/software/benchmarks/SPEC/cpu2006-armel/exe -b arm-cpu2006-all -g .armel -x /soe/cromom/ESESC_CURR/build/main/esesc -v tradcore

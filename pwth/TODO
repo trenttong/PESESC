@@ -1,0 +1,85 @@
+
+-Move out of mcpat
+
+-Use muparser to describe models:
+
+#include <iostream>
+#include <unistd.h>
+#include <stdlib.h>
+#include <muParser/muParser.h>
+
+// main program
+// To compile: g++ test.cpp -lmuparser
+int main(int argc, char* argv[])
+{
+  if (argc==1) {
+    std::cerr << "Usage " << argv[0] << " <expr>" << std::endl;
+    std::cerr << "where T is temperature, and S is size. E.g: " << argv[0]
+      << " \"(1.3*S+1.44*S2+1.7*S3 )/T\" " << std::endl;
+    exit(-1);
+  }
+
+  try {
+    double val_S = 2;
+    double val_T = 276;
+    mu::Parser p;
+    p.DefineConst("S", val_S);
+    p.DefineVar("T", &val_T);
+    p.SetExpr(argv[1]);
+    std::cout << p.Eval() << std::endl;
+  } catch (mu::Parser::exception_type &e) {
+    std::cout << e.GetMsg() << std::endl;
+  }
+
+  return 0;
+} 
+
+
+---------------
+Sample muparser conf:
+
+energy = "energySection"
+
+[EnergySection]
+# Implicit CPUID, Temp, VoltScale
+tech = 32
+frequency = 1.6GHz
+
+[SRAM_1Port_large]
+dynamic = "P1+3.23*AR"
+leakage = "P1+3.23*P0+(32^temp)"
+
+[SRAM_1Port_Small_Fast]
+dynamic = "P1+5.23*P0"
+leakage = "P1+7.23*P0+(32^temp)"
+
+[ROB]
+local[0] = "P(P0)_nCommited"
+dynamic = "tech+3.23*l0"
+leakage = "l0*(10*temp)"
+
+[efficientcache]
+dynamic = "..."
+leakage = "..."
+
+[bpred]
+# C1,C2...Cn are constants that can not change at runtime to a model
+# locals would be a reference to a variable or model that changes at runtime
+AR = "P(P0)_ExeEngine_iBALU_BRANCH:n + P(P0)_ExeEngine_iBALU_JUMP:n"
+dynamic = "SRAM_1Port_Small_Fast(cpucore[P0].robSize).dynamic"
+leakage = "SRAM_1Port_Small_Fast(cpucore[P0].robSize).leakage"
+
+[TLB]
+AR = "P(P0)_IL1:writeHit +P(P0)_IL1:writeMiss +P(P0)_IL1:readHit+P(P0)_IL1:readMiss"
+dynamic = "CAM_Small(cpucore[P0].dtlbsize).dynamic"
+leakage = "CAM_Small(cpucore[P0].dtlbsize).leakage"
+
+[layoutDescr0]
+blockMatch[0] = "bpred(0) + cache1"
+blockMatch[1] = "ROB(0)"
+blockMatch[2] = "bpred(1)"
+
+
+# The previous configuration will render useless the stats fields, and the mcpat library
+
+

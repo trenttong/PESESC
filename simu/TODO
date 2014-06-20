@@ -1,0 +1,12 @@
+
+Rename SescConf to sescconf (variables should be lowercase)
+
+Make sure that all the code is tabulated/formatted as
+
+ foo () {
+   if (cond) {
+   }else{
+   }
+ }
+
+Remove Gmemoryos 
