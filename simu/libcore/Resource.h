@@ -38,6 +38,10 @@ Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 #include "Delinquency.h"
 #endif // DELINQUENT_LOAD
 
+#ifdef ENABLE_PREFETCH
+#include "PrefetchInterface.h"
+#endif // ENABLE_PREFETCH
+
 class PortGeneric;
 class DInst;
 class MemObj;

@@ -458,9 +458,9 @@ void QEMUReader::syscall(uint32_t num, Time_t time, FlowID fid)
 
 uint32_t QEMUReader::wait_until_FIFO_full(FlowID fid)
 {
-  while(!tsfifo[fid].full()) {
+  if(!tsfifo[fid].full()) {
     pthread_yield();
-    if (qsamplerlist[fid]->isActive(fid) == false)
+    if (qsamplerlist[0/*fid*/]->isActive(0/*fid*/) == false)	// ATTA: again hard coded fid to 0 because there is no sampler for the Pcore thread.
       return 0;
     if (!tsfifo[fid].full()) {
       pthread_yield();

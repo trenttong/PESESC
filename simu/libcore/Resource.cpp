@@ -665,6 +665,8 @@ void FULoad::cacheDispatched(DInst *dinst) {
 #endif // DELINQUENT_LOAD
 
   MemRequest *mreq=MemRequest::createRead(DL1, dinst, dinst->getAddr(), performedCB::create(this,dinst));
+  mreq->coreID = dinst->getFlowId();	// ATTA: core ID is used later to identify which request come from Mcore vs. Pcore
+  if(dinst->getFlowId() != 0) mreq->markPrefetch();
   mreq->fwdRead();
 }
 /* }}} */
@@ -673,8 +675,14 @@ void FULoad::executed(DInst* dinst) {
   /* executed {{{1 */
 
 #ifdef DELINQUENT_LOAD
-	DelinquencyAnalyzer::insertStat(myFid, dinst);
+	if(myFid == 0) DelinquencyAnalyzer::insertStat(myFid, dinst);
 #endif // DELINQUENT_LOAD
+
+#ifdef ENABLE_PREFETCH
+	//((MemObj*)(dinst->getHitLevel()))->getName()
+	if(myFid == 0 && !dinst->loadForwarded)	// Check if I'm the Main core (Pcore does not prefetch)
+		PrefetchInterface::insertDemands(dinst);
+#endif // ENABLE_PREFETCH
 	storeset->remove(dinst);
 
   dinst->markExecuted();
@@ -765,8 +773,15 @@ void FUStore::executing(DInst *dinst) {
 
   if (dinst->getInst()->isStoreAddress()) {
 #if 1
-    MemRequest *mreq=MemRequest::createWriteAddress(DL1, dinst, executedCB::create(this,dinst));
-    mreq->fwdWriteAddress();
+    // ATTA: again is a dirty hack to prevent Pcore from storing to memory heirarchy
+	if(dinst->fid == 0) {
+	  MemRequest *mreq=MemRequest::createWriteAddress(DL1, dinst, executedCB::create(this,dinst));
+      mreq->fwdWriteAddress();
+    }
+    else {
+      MemRequest *mreq=MemRequest::createRead(DL1, dinst, dinst->getAddr(), executedCB::create(this,dinst));
+      mreq->fwdRead();
+    }
 #else
     executed(dinst);
 #endif
@@ -809,8 +824,14 @@ bool FUStore::preretire(DInst *dinst, bool flushing) {
     return false;
   }
 
+  // ATTA: one more dirty hack to prevent Pcore from writing to the memory heirarchy
+  if(dinst->fid == 0){
   MemRequest *mreq=MemRequest::createWrite(DL1, dinst, performedCB::create(this,dinst));
   mreq->fwdWrite();
+  } else {
+	  MemRequest *mreq=MemRequest::createRead(DL1, dinst, dinst->getAddr(), performedCB::create(this,dinst));
+	  mreq->fwdRead();
+  }
 
   return true;
 }

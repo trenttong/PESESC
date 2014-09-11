@@ -1070,6 +1070,18 @@ typedef struct {
 } MemByte;
 
 
+extern target_ulong *prefetch_address ;
+extern target_ulong prefetch_address_idx ;
+
+#include <unistd.h>
+#include <sys/mman.h>
+
+static bool is_valid_address(void *p)
+{
+   unsigned char vec = 0;
+   return -1 != mincore(p, getpagesize(), &vec);
+}
+
 static char fetch_translated_linear(CPUState *env, void *p)
 {
     MemoryByte *head = env->sbytes[(intptr_t)(p) & (MEMBYTE_BUCKET_NUM-1)];
@@ -1079,7 +1091,12 @@ static char fetch_translated_linear(CPUState *env, void *p)
        }
        head = head->next;
     }
-    return *(char*)p;
+
+    if (is_valid_address(p))  return *(char*)p;
+
+    /* this is not a valid address */
+    env->bogus_record = 1;
+    return 0;
 }
 
 static void esesc_shadow_load_process(CPUState *env)
@@ -1091,6 +1108,8 @@ static void esesc_shadow_load_process(CPUState *env)
        //printf("0x%lx : shadow load byte linear address is 0x%lx\n", (long int) env->regs[15], (long int)(intptr_t)(env->ld_linear+i));
        env->ld_databytes[i] = fetch_translated_linear(env, (void*)(intptr_t)(env->ld_linear+i));
     }
+
+    prefetch_address[prefetch_address_idx++ % 1024] = env->ld_linear;
     return;
 }
 
@@ -1516,7 +1535,10 @@ static void esesc_shadow_store_process(CPUState *env)
        env->blinear = env->st_linear + idx;
        //printf("shadow store byte linear address is 0x%lx\n", (long int) env->blinear);
        env->bdata   = env->st_databytes[idx];
-       esesc_shadow_store_process_byte(env);
+
+       /* this is a valid address */
+       if (is_valid_address((void*)(uintptr_t)env->blinear)) esesc_shadow_store_process_byte(env);
+       else env->bogus_record = 1;
     }
     return;
 }

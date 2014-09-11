@@ -71,7 +71,7 @@ class SharedCache :public Component{
     double scktRatio, executionTime;
     //   Component L2Tot, cc, cc1, ccTot;
 
-    SharedCache(ParseXML *XML_interface, int ithCache_, InputParameter* interface_ip_,enum cache_level cacheL_ =L2);
+    SharedCache(ParseXML *XML_interface, int ithCache_, InputParameter* interface_ip_,enum cache_level cacheL_ =Level_2);
     void set_cache_param(); 
     void update_rtparam(ParseXML *XML_interface, int ithCache_, InputParameter* interface_ip_); //eka
 	void computeEnergy(bool is_tdp=true);

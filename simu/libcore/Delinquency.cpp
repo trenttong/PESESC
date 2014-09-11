@@ -13,6 +13,9 @@
 
 #ifdef DELINQUENT_LOAD
 
+extern char* globalReportFile;
+extern bool disable_pcore;
+
 vector<DelinquencyAnalyzer::ADDR_MAP> DelinquencyAnalyzer::instMaps;
 vector<DelinquencyAnalyzer::ADDR_MAP> DelinquencyAnalyzer::dataMaps;
 vector<DelinquencyAnalyzer::stringVector> DelinquencyAnalyzer::levelNames;
@@ -31,7 +34,7 @@ void DelinquencyAnalyzer::addMap(FlowID fid) {
 	if (levelNames.empty()) {
 		levelNames.resize(nsimu);
 		for (uint32_t i = 0; i < nsimu; i++)
-			levelNames[i].resize(4);
+		levelNames[i].resize(4);
 	}I(!levelNames.empty());
 
 	instMaps[fid].clear();
@@ -49,14 +52,14 @@ string privatizeDeviceName(string given_name, int32_t num) {
 	return temp;
 }
 
-DelinquencyAnalyzer::LEVEL DelinquencyAnalyzer::getLevel(FlowID fid,
+HIT_LEVEL DelinquencyAnalyzer::getLevel(FlowID fid,
 		MemObj* obj) {
 	if (obj) {
 		string objName = string(obj->getName());
-		for (LEVEL l = L1; l < InvalidLevel; l = (LEVEL) ((int) l + 1)) {
+		for (HIT_LEVEL l = L1; l < InvalidLevel; l = (HIT_LEVEL) ((int) l + 1)) {
 			//if (levelNames[fid][l].compare(objName) == 0)
 			if(objName.find(levelNames[fid][l]) != string::npos)
-				return l;
+			return l;
 		}
 	}
 	return InvalidLevel;
@@ -71,10 +74,10 @@ DelinquencyAnalyzer::LEVEL DelinquencyAnalyzer::getLevel(FlowID fid,
  }
  */
 /*
- DelinquencyAnalyzer::LEVEL DelinquencyAnalyzer::getLevel(MemObj* obj) {
+ DelinquencyAnalyzer::HIT_LEVEL DelinquencyAnalyzer::getLevel(MemObj* obj) {
  if (obj) {
  const char* objName = obj->getName();
- for (LEVEL l = L1; l < InvalidLevel; l = (LEVEL) ((int) l + 1)) {
+ for (HIT_LEVEL l = L1; l < InvalidLevel; l = (HIT_LEVEL) ((int) l + 1)) {
  if (!strcmp(levelNames[l], objName))
  return l;
  }
@@ -122,7 +125,15 @@ void DelinquencyAnalyzer::sortAndReportTopDelinquentPCs(unsigned int count) {
 
 	//Dump top delinquent loads in a CSV file.
 	for (uint32_t i = 0; i < instMaps.size(); i++) {
+		if(instMaps[i].empty())
+			continue;
+			
 		string filename = "topdelinquent_";
+		filename += globalReportFile;
+		filename += "_";
+		//if(!disable_pcore) {
+		//	filename += "pcore_";
+		//}
 		ostringstream convert;
 		convert << i;
 		filename += convert.str();
@@ -133,7 +144,7 @@ void DelinquencyAnalyzer::sortAndReportTopDelinquentPCs(unsigned int count) {
 			set<perInstStat> highestAverageLatencyPCs;
 
 			csv
-					<< "PC,Load Forward,L1_hits,L2_hits,L3_hits,Offchip,Sum of Distances, Sum of Delays,L1_missRate,L2_missRate,L3_missRate,Avg Access Distance,Max Distance,Min Distance,Avg Access Latency\n";
+			<< "PC,Load Forward,L1_hits,L2_hits,L3_hits,Offchip,Total Accesses,L1_missRate,L2_missRate,L3_missRate,Sum of Delays,Avg Access Latency\n";
 
 			map<AddrType, perInstStat>::iterator mapit;
 			for (mapit = instMaps[i].begin(); mapit != instMaps[i].end();
@@ -151,29 +162,28 @@ void DelinquencyAnalyzer::sortAndReportTopDelinquentPCs(unsigned int count) {
 					rit != highestAverageLatencyPCs.rend(); rit++) {
 				perInstStat p = *rit;
 				double L1_missRate = (double) (p.hitL2 + p.hitL3 + p.hitMem)
-						/ (double) (p.hitL1 + p.hitL2 + p.hitL3 + p.hitMem);
+				/ (double) (p.hitL1 + p.hitL2 + p.hitL3 + p.hitMem);
 				double L2_missRate = (double) (p.hitL3 + p.hitMem)
-						/ (double) (p.hitL2 + p.hitL3 + p.hitMem);
+				/ (double) (p.hitL2 + p.hitL3 + p.hitMem);
 				double L3_missRate = (double) (p.hitMem)
-						/ (double) (p.hitL3 + p.hitMem);
+				/ (double) (p.hitL3 + p.hitMem);
 				double avgAccessDistance = (double) p.sumOfDifferences
-						/ (double) (p.hitL1 + p.hitL2 + p.hitL3 + p.hitMem
-								+ p.loadForward - 1);
+				/ (double) (p.hitL1 + p.hitL2 + p.hitL3 + p.hitMem
+						+ p.loadForward - 1);
 				double avgLatency = (double) p.sumOfLoadDelays
-						/ (double) (p.hitL1 + p.hitL2 + p.hitL3 + p.hitMem
-								+ p.loadForward);
+				/ (double) (p.hitL1 + p.hitL2 + p.hitL3 + p.hitMem
+						+ p.loadForward);
 
 				csv << std::hex << p.addr << std::dec << "," << p.loadForward << "," << p.hitL1 << ","
-						<< p.hitL2 << "," << p.hitL3 << "," << p.hitMem << ","
-						<< p.sumOfDifferences << "," << p.sumOfLoadDelays << ","
-						<< L1_missRate << "," << L2_missRate << ","
-						<< L3_missRate << "," << avgAccessDistance << ","
-						<< p.maxReuse << "," << p.minReuse << "," << avgLatency
-						<< endl;
+				<< p.hitL2 << "," << p.hitL3 << "," << p.hitMem << ","
+				<< p.loadForward + p.hitL1 + p.hitL2 + p.hitL3 + p.hitMem << ","
+				<< L1_missRate << "," << L2_missRate << ","
+				<< L3_missRate << "," << p.sumOfLoadDelays << "," << avgLatency
+				<< endl;
 			}
 			csv.close();
 		} else
-			cerr << "ERROR: cannot open CSV file: " << filename << "!\n";
+		cerr << "ERROR: cannot open CSV file: " << filename << "!\n";
 	}
 }
 
@@ -184,21 +194,20 @@ void DelinquencyAnalyzer::reset() {
 
 void DelinquencyAnalyzer::insertStat(FlowID fid, DInst* dinst) {
 
-	LEVEL level = getLevel(fid, dinst->getHitLevel());
+	HIT_LEVEL level = getLevel(fid, dinst->getHitLevel());
 	if (level == InvalidLevel && dinst->isLoadForwarded())
-		level = LoadForward;
+	level = LoadForward;
 	I(level != InvalidLevel);
 	Time_t reuseID = dinst->getID();
 	AddrType instAddr = dinst->getPC();
-	AddrType dataAddr = dinst->getAddr();
 	Time_t delay = globalClock - dinst->getFetchTime();
 
-	insertInstMap(fid, instAddr, dataAddr, level, reuseID, delay);
+	insertInstMap(fid, instAddr, level, reuseID, delay);
 //insertDataMap(dataAddr, level, reuseID, delay);
 }
 
 void DelinquencyAnalyzer::insertInstMap(FlowID fid, AddrType instAddr,
-		AddrType dataAddr, LEVEL level, Time_t reuseID, Time_t delay) {
+		HIT_LEVEL level, Time_t reuseID, Time_t delay) {
 	if (instMaps[fid].find(instAddr) == instMaps[fid].end()) {
 		perInstStat statElement;
 		statElement.hitL1 = statElement.hitL2 = statElement.hitL3 = statElement.hitMem = statElement.loadForward = statElement.sumOfLoadDelays = statElement.sumOfDifferences = 0;
@@ -209,37 +218,37 @@ void DelinquencyAnalyzer::insertInstMap(FlowID fid, AddrType instAddr,
 		instMaps[fid][instAddr] = statElement;
 	}
 	switch (level) {
-	case L1:
+		case L1:
 		instMaps[fid][instAddr].hitL1++;
 		break;
-	case L2:
+		case L2:
 		instMaps[fid][instAddr].hitL2++;
 		break;
-	case L3:
+		case L3:
 		instMaps[fid][instAddr].hitL3++;
 		break;
-	case MEMORY:
+		case MEMORY:
 		instMaps[fid][instAddr].hitMem++;
 		break;
-	case LoadForward:
+		case LoadForward:
 		instMaps[fid][instAddr].loadForward++;
 		break;
-	default:
+		default:
 		I(0);
 		break;
 	}
 	// TODO: Add max and min reuse distance
-	Time_t reuseDistance = reuseID - instMaps[fid][instAddr].lastReuse;
-	instMaps[fid][instAddr].sumOfDifferences += reuseDistance;
-	instMaps[fid][instAddr].maxReuse = MAX(instMaps[fid][instAddr].maxReuse, reuseDistance);
-	if (reuseDistance)
-		instMaps[fid][instAddr].minReuse = MIN(instMaps[fid][instAddr].minReuse, reuseDistance);
-	instMaps[fid][instAddr].lastReuse = reuseID;
+	//Time_t reuseDistance = reuseID - instMaps[fid][instAddr].lastReuse;
+	//instMaps[fid][instAddr].sumOfDifferences += reuseDistance;
+	//instMaps[fid][instAddr].maxReuse = MAX(instMaps[fid][instAddr].maxReuse, reuseDistance);
+	//if (reuseDistance)
+	//	instMaps[fid][instAddr].minReuse = MIN(instMaps[fid][instAddr].minReuse, reuseDistance);
+	//instMaps[fid][instAddr].lastReuse = reuseID;
 	instMaps[fid][instAddr].sumOfLoadDelays += delay;
 }
 
 void DelinquencyAnalyzer::insertDataMap(FlowID fid, AddrType dataAddr,
-		LEVEL level, Time_t reuseID, Time_t delay) {
+		HIT_LEVEL level, Time_t reuseID, Time_t delay) {
 	if (dataMaps[fid].find(dataAddr) == dataMaps[fid].end()) {
 		perInstStat statElement;
 		statElement.hitL1 = statElement.hitL2 = statElement.hitL3 = statElement.hitMem = statElement.loadForward = statElement.sumOfLoadDelays = statElement.sumOfDifferences = 0;
@@ -248,28 +257,28 @@ void DelinquencyAnalyzer::insertDataMap(FlowID fid, AddrType dataAddr,
 		dataMaps[fid][dataAddr] = statElement;
 	}
 	switch (level) {
-	case L1:
+		case L1:
 		dataMaps[fid][dataAddr].hitL1++;
 		break;
-	case L2:
+		case L2:
 		dataMaps[fid][dataAddr].hitL2++;
 		break;
-	case L3:
+		case L3:
 		dataMaps[fid][dataAddr].hitL3++;
 		break;
-	case MEMORY:
+		case MEMORY:
 		dataMaps[fid][dataAddr].hitMem++;
 		break;
-	case LoadForward:
+		case LoadForward:
 		dataMaps[fid][dataAddr].loadForward++;
 		break;
-	default:
+		default:
 		I(0);
 		break;
 	}
 
 	dataMaps[fid][dataAddr].sumOfDifferences += reuseID
-			- dataMaps[fid][dataAddr].lastReuse;
+	- dataMaps[fid][dataAddr].lastReuse;
 	dataMaps[fid][dataAddr].lastReuse = reuseID;
 	dataMaps[fid][dataAddr].sumOfLoadDelays += delay;
 }

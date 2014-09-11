@@ -117,6 +117,14 @@ public:
   virtual void updateXCoreStores(AddrType addr) {};
   virtual void replayflush() {};
 
+//#ifdef ENABLE_PREFETCH
+  virtual void prefetch(AddrType addr) {}
+
+  virtual int getExtraBit(AddrType addr) { return -1; }
+  virtual void resetExtraBit(AddrType addr) {}
+  virtual void setExtraBit(AddrType addr) {}
+//#endif // ENABLE_PREFETCH
+
 };
 
 class DummyMemObj : public MemObj {

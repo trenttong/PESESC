@@ -28,6 +28,9 @@ Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 #include "EmuSampler.h"
 #include "EmulInterface.h"
 #include <string.h>
+
+#include "PrefetchInterface.h"
+
 /* }}} */
 
 std::vector<TaskHandler::EmulSimuMapping >   TaskHandler::allmaps;
@@ -429,6 +432,10 @@ void TaskHandler::boot()
       psimu->fetch(fid+1);
       psimu->execute();
 #endif // CREATE_PCORE
+
+#ifdef ENABLE_PREFETCH
+      PrefetchInterface::IssuePrefetches(globalClock);
+#endif // ENABLE_PREFETCH
     }
     if (running_size == 0) {
       bool needIncreaseClock = false;

@@ -117,10 +117,10 @@ SharedCache::SharedCache(ParseXML* XML_interface, int ithCache_, InputParameter*
   interface_ip.num_search_ports    = 1;
 
 	switch (cacheL) {
-		case L2: 
+		case Level_2: 
 			interface_ip.freq                = XML->sys.L2[0].clockrate;
 			break;
-		case L3:
+		case Level_3:
 			interface_ip.freq                = XML->sys.L3[0].clockrate;
 			break;
 		case L1Directory:
@@ -324,7 +324,7 @@ void SharedCache::computeEnergy(bool is_tdp)
 		//init stats for runtime power (RTP)
 		//eka
 		rt_power.reset();
-		if (cacheL==L2)
+		if (cacheL==Level_2)
 		{
 			unicache.caches->stats_t.readAc.access  = XML->sys.L2[ithCache].read_accesses;
 			unicache.caches->stats_t.readAc.miss    = XML->sys.L2[ithCache].read_misses;
@@ -354,7 +354,7 @@ void SharedCache::computeEnergy(bool is_tdp)
 			unicache.caches->stats_t.writeAc.hit    = unicache.caches->stats_t.writeAc.access -	unicache.caches->stats_t.writeAc.miss;
 			unicache.caches->rtp_stats = unicache.caches->stats_t;
 		}
-		else if (cacheL==L3)
+		else if (cacheL==Level_3)
 		{
 			unicache.caches->stats_t.readAc.access  = XML->sys.L3[ithCache].read_accesses;
 			unicache.caches->stats_t.readAc.miss    = XML->sys.L3[ithCache].read_misses;
@@ -479,7 +479,7 @@ void SharedCache::displayEnergy(uint32_t indent,bool is_tdp)
 
 void SharedCache::set_cache_param()
 {
-	if (cacheL==L2)
+	if (cacheL==Level_2)
 	{
 		cachep.name = "L2";
 		cachep.dir_ty = NonDir;
@@ -541,7 +541,7 @@ void SharedCache::set_cache_param()
 		cachep.throughput    = XML->sys.STLB[ithCache].STLB_config[4]/cachep.clockRate;
 		cachep.latency       = XML->sys.STLB[ithCache].STLB_config[5]/cachep.clockRate;
 	}
-	else if (cacheL==L3)
+	else if (cacheL==Level_3)
 	{
 		cachep.name = "L3";
 		cachep.dir_ty = NonDir;

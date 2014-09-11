@@ -423,10 +423,32 @@ public:
 
 template<class Addr_t>
 class StateGeneric {
+	// ========================
+	// ATTA: a flag to distinguish between different types of cache requests.
+	enum PrefetchState {NOPREF = 0, PCORE, HARDWARE} prefetchState;
+	// ========================
 private:
   Addr_t tag;
 
+  //==================================
+  // ATTA:
+  int extraBit;
+  //==================================
+
 public:
+  // ========================
+  // ATTA: setters and getters for the prefetch type flag.
+  void prefetchHardware() { prefetchState = HARDWARE; }
+  void prefetchPcore() { prefetchState = PCORE; }
+  void prefetchNone() { prefetchState = NOPREF; }
+  bool isPrefetchHardware() { return (prefetchState==HARDWARE); }
+  bool isPrefetchPcore() { return (prefetchState==PCORE); }
+  bool isPrefetchNone() { return (prefetchState==NOPREF); }
+  int getExtraBit() { return extraBit; }
+  void setExtraBit() { extraBit = 1; }
+  void resetExtraBit() { extraBit = 0; }
+  // ========================
+
   virtual ~StateGeneric() {
     tag = 0;
   }
@@ -434,9 +456,10 @@ public:
  Addr_t getTag() const { return tag; }
  void setTag(Addr_t a) {
    I(a);
-   tag = a; 
+   tag = a;
+   extraBit = 1;
  }
- void clearTag() { tag = 0; }
+ void clearTag() { tag = 0; extraBit = -1; }
  void initialize(void *c) { 
    clearTag(); 
  }

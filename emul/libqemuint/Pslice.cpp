@@ -48,9 +48,11 @@ void Pslice::insertInst(AddrType pc, uint32_t insn, AddrType addr,
 
 void Pslice::dumpToFile() {
 	dumpPtrace();
+#ifdef CONSTRUCT_PSLICE
 	dumpPslice();
+#endif //CONSTRUCT_PSLICE
 }
-
+#ifdef CONSTRUCT_PSLICE
 bool Pslice::dumpPslice() {
 	string fileName = "pslices/";
 	ostringstream delPCstr;
@@ -113,6 +115,7 @@ bool Pslice::dumpPslice() {
 	fclose(csv);
 	return true;
 }
+#endif // CONSTRUCT_PSLICE
 
 bool Pslice::dumpPtrace() {
 	string fileName = "pslices/";
@@ -214,7 +217,7 @@ void Pslice::identifyPtraceLiveIns() {
 	for (int i = 0; i < INVALID_ARM_REG; i++)
 		numberOfLiveIns += (liveIns[i]) ? 1 : 0;
 }
-
+#ifdef CONSTRUCT_PSLICE
 void Pslice::identifyPsliceLiveIns() {
 	// Algorithm: a live-in register is a SRC register that has not been written to (i.e. was not a DST) by a prior instruction
 	bool dstRegs[INVALID_ARM_REG + 1];
@@ -257,6 +260,7 @@ void Pslice::identifyPsliceLiveIns() {
 	for (int i = 0; i < INVALID_ARM_REG; i++)
 		numberOfLiveIns += (liveIns[i]) ? 1 : 0;
 }
+#endif // CONSTRUCT_PSLICE
 
 // Compares two Pslices and determines if they are exactly the same based on the sequence of PCs
 // Note that the basic assumption is that both Pslices belong to the same delinquent PC.
@@ -372,7 +376,7 @@ void Pslice::generatePtraceSignature() {
 	//Insert the delinquent load PC
 	signature.push_back(delPC);
 }
-
+#ifdef CONSTRUCT_PSLICE
 void Pslice::generatePsliceSignature() {
 
 	signature.clear();
@@ -488,6 +492,7 @@ void Pslice::generatePslice() {
 		}
 	}
 }
+#endif // CONSTRUCT_PSLICE
 
 void PsliceMemoryMap::resize(size_t newSize) {
 	memap.resize(newSize);

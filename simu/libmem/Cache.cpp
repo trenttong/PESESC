@@ -37,7 +37,12 @@
 #include "GProcessor.h"
 #include "TaskHandler.h"
 /* }}} */
+
+extern char *globalReportFile;
+#define MAX_PREF_ADDRESS_LIST 100
+
 #define alamelu_dbg 0
+
 Cache::Cache(MemorySystem *gms, const char *section, const char *name)
   /* constructor {{{1 */
   : MemObj(section, name)
@@ -64,6 +69,14 @@ Cache::Cache(MemorySystem *gms, const char *section, const char *name)
   ,capInvalidateMiss  ("%s_capInvalidateMiss",  name)
   ,invalidateHit   ("%s_invalidateHit",   name)
   ,invalidateMiss  ("%s_invalidateMiss",  name)
+  // =======================
+  // ATTA: statistic for prefetching
+  ,allocHardwPref  ("%s:allocHardwPref",  name)
+  ,allocPcorePref  ("%s:allocPcorePref",  name)
+  ,accessHardwPref ("%s:accessHardwPref", name)
+  ,accessPcorePref ("%s:accessPcorePref", name)
+  // =======================
+
 {
 
   const char* mshrSection = SescConf->getCharPtr(section,"MSHR");
@@ -177,6 +190,17 @@ Cache::Line *Cache::allocateLine(AddrType addr, MemRequest *mreq)
   Line *l = cacheBank->fillLine(addr, rpl_addr);
   lineFill.inc(mreq->getStatsFlag());
 
+  // =================================
+  // ATTA: count the number fillings for prefetchers
+  l->setExtraBit();
+  if(mreq->coreID != 0 && mreq->isPrefetch())
+	  allocPcorePref.inc(true);
+  else if(mreq->isPrefetch()) {
+	  allocHardwPref.inc(true);
+	  //insertPrefAddress(addr);
+  }
+  // =================================
+
   I(l); // Ignore lock guarantees to find line
 
   if(l->isValid())
@@ -185,6 +209,43 @@ Cache::Line *Cache::allocateLine(AddrType addr, MemRequest *mreq)
   return l;
 }
 /* }}} */
+#ifdef ENABLE_PREFETCH
+void Cache::insertPrefAddress(AddrType addr){
+    prefAddresses.push_back(addr);
+    if(prefAddresses.size() >= MAX_PREF_ADDRESS_LIST)
+    	dumpPrefAddresses();
+}
+
+void Cache::dumpPrefAddresses() {
+
+	string fileName = "pslices/pref-";
+	fileName += globalReportFile;
+    fileName += "-";
+	fileName += name;
+	fileName += ".out";
+	FILE* outFile = fopen(fileName.c_str(), "a");
+
+	if (!outFile) {
+		fprintf(stderr,
+				"OOPS: target addresses file (%s) could not be created!\n",
+				fileName.c_str());
+	}
+
+	list<AddrType>::iterator it;
+
+	for (it = prefAddresses.begin();
+			it != prefAddresses.end(); it++) {
+		AddrType temp = (AddrType) (*it);
+		fprintf(outFile, "%x\n", temp);
+	}
+
+	prefAddresses.clear();
+
+	fclose(outFile);
+
+	return;
+}
+#endif // ENABLE_PREFETCH
 
 void Cache::doWriteback(AddrType addr)
 /* write back a line {{{1 */
@@ -262,6 +323,16 @@ void Cache::doRead(MemRequest *mreq, bool retrying)
 
   readHit.inc(mreq->getStatsFlag());
 
+  // ========================
+  // ATTA: measure accuracy of prefetchers
+  if(l->isPrefetchHardware())
+	  accessHardwPref.inc(mreq->getStatsFlag());
+  else if(l->isPrefetchPcore())
+	  accessPcorePref.inc(mreq->getStatsFlag());
+  // ATTA: reset the prefetch type flag
+  l->prefetchNone();
+  // ========================
+
 #ifdef DELINQUENT_LOAD
   //ATTA: set the hit level of the memeroy request to match the current level
   mreq->setHitLevel(this);
@@ -307,6 +378,16 @@ void Cache::doWrite(MemRequest *mreq, bool retrying)
     router->fwdBusRead(mreq, missDelay);
     return;
   }
+
+  // ========================
+  // ATTA: measure accuracy of prefetchers
+  if(l->isPrefetchHardware())
+	  accessHardwPref.inc(mreq->getStatsFlag());
+  else if(l->isPrefetchPcore())
+	  accessPcorePref.inc(mreq->getStatsFlag());
+  // ATTA: reset the prefetch type flag
+  l->prefetchNone();
+  // ========================
 
   I(l->isValid());
 
@@ -406,6 +487,15 @@ void Cache::doBusRead(MemRequest *mreq, bool retrying)
     writeHit.inc(mreq->getStatsFlag());
   }
 
+  // ========================
+  // ATTA: measure accuracy of prefetchers
+  if(l->isPrefetchHardware())
+	  accessHardwPref.inc(mreq->getStatsFlag());
+  else if(l->isPrefetchPcore())
+	  accessPcorePref.inc(mreq->getStatsFlag());  // ATTA: reset the prefetch type flag
+  l->prefetchNone();
+  // ========================
+
   I(mreq->isWrite());
 
   TimeDelta_t lat = getHitDelay(mreq);
@@ -502,6 +592,20 @@ void Cache::doPushUp(MemRequest *mreq)
   else
     l->setExclusive();
 
+  // ========================
+  // ATTA: set lines prefetched by Pcore to be shared (to avoid invalidations)
+  // ATTA: set the type of prefetch
+  if(mreq->coreID != 0 && mreq->isPrefetch()) {
+	  I(mreq->isRead());
+	  l->prefetchPcore();
+	  l->setShared();
+  }
+  else if(mreq->isPrefetch())
+	  l->prefetchHardware();
+  else
+	  l->prefetchNone();
+  // ========================
+
   mshr->retire(addr);
 
   avgMissLat.sample(mreq->getTimeDelay()+1, mreq->getStatsFlag());
@@ -563,7 +667,7 @@ void Cache::doInvalidate(MemRequest *mreq)
 void Cache::read(MemRequest *mreq)
 /* main processor read entry point {{{1 */
 {
-  // predicated ARM instructions canbe with zero address
+  // predicated ARM instructions can be with zero address
   if(mreq->getAddr() == 0) {
     mreq->ack(getHitDelay(mreq));
     return;

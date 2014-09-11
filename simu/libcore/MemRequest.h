@@ -400,20 +400,23 @@ protected:
   bool isLoadMiss() const {return loadMiss;}
   bool getStatsFlag() const { 
 
+	  // ATTA: insert this condition to avoid modifying results for prefetches.
+	  if(prefetch) return false;
+
     if (dinst) 
       return dinst->getStatsFlag(); 
     return true; // if not bounded to a DInst, just do the stats
   }
   bool isCapacityInvalidate() { return capInvalidate; }
   
-  float getL1clkRatio(){ return dinst->getL1clkRatio(); }
-  float getL3clkRatio(){ return dinst->getL3clkRatio(); }
+  float getL1clkRatio(){ return prefetch ? 1 : dinst->getL1clkRatio(); }
+  float getL3clkRatio(){ return prefetch ? 1 : dinst->getL3clkRatio(); }
 
-#ifdef DELINQUENT_LOAD
+//#ifdef DELINQUENT_LOAD
   //ATTA: setters and getters for hitLevel
-  void setHitLevel(MemObj* hitObjLevel) { dinst->setHitLevel(hitObjLevel); }
-  MemObj* getHitLevel() { return dinst->getHitLevel(); }
-#endif // DELINQUENT_LOAD
+  void setHitLevel(MemObj* hitObjLevel) { if(/*(coreID != 0) ||*/ (coreID == 0 && !prefetch)) dinst->setHitLevel(hitObjLevel); }
+  //MemObj* getHitLevel() { return (coreID == 0 && !prefetch) ? 0: dinst->getHitLevel(); }
+//#endif // DELINQUENT_LOAD
 
 };
 

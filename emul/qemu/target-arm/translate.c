@@ -11576,10 +11576,6 @@ static inline void gen_intermediate_code_internal(CPUState *env,
 #if ENABLE_INSTRUCTION_TRACING
     /* trace the PC here. */
     XTRACE_PC(dc->pc);
-    if (0xb1d6 == dc->pc)
-    {
-    printf("PC is 0x%lx\n", (long int)dc->pc);
-    }
 #endif
     xtrace_ppc = dc->pc;
     xtrace_lsm = 0;

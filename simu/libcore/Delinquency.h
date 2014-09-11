@@ -37,9 +37,9 @@ class DInst;
 class DelinquencyAnalyzer {
 
 protected:
-	enum LEVEL {
-		L1 = 0, L2, L3, MEMORY, InvalidLevel, LoadForward
-	};
+	//enum HIT_LEVEL {
+	//	L1 = 0, L2, L3, MEMORY, InvalidLevel, LoadForward
+	//};
 
 	struct perInstStat {
 		ulong hitL1;
@@ -60,10 +60,10 @@ protected:
 
 		bool operator<(perInstStat other) const {
 			double myAvgDelay = (double) sumOfLoadDelays
-					/ (double) (hitL1 + hitL2 + hitL3 + hitMem + loadForward);
+			/ (double) (hitL1 + hitL2 + hitL3 + hitMem + loadForward);
 			double otherAvgDelay = (double) other.sumOfLoadDelays
-					/ (double) (other.hitL1 + other.hitL2 + other.hitL3
-							+ other.hitMem + other.loadForward);
+			/ (double) (other.hitL1 + other.hitL2 + other.hitL3
+					+ other.hitMem + other.loadForward);
 			return myAvgDelay < otherAvgDelay;
 		}
 
@@ -82,7 +82,7 @@ protected:
 		}
 	};
 
-	static LEVEL getLevel(FlowID fid, MemObj* obj);
+	static HIT_LEVEL getLevel(FlowID fid, MemObj* obj);
 
 	typedef map<AddrType, perInstStat> ADDR_MAP;
 	static vector<ADDR_MAP> instMaps;
@@ -98,9 +98,9 @@ public:
 
 	static void reset();
 	static void insertStat(FlowID fid, DInst* dinst);
-	static void insertInstMap(FlowID fid, AddrType instAddr, AddrType dataAddr,
-			LEVEL level, Time_t reuseID, Time_t delay);
-	static void insertDataMap(FlowID fid, AddrType dataAddr, LEVEL level,
+	static void insertInstMap(FlowID fid, AddrType instAddr,
+			HIT_LEVEL level, Time_t reuseID, Time_t delay);
+	static void insertDataMap(FlowID fid, AddrType dataAddr, HIT_LEVEL level,
 			Time_t reuseID, Time_t delay);
 
 	static void addMap(FlowID fid);

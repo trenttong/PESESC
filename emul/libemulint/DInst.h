@@ -46,7 +46,17 @@ class EmulInterface;
 #define PRINT_TOTALINST
 #endif // PRINT_CLOCKTICKS
 
-#define PSLICE_CONSTRUCT	// ATTA: uncomment this flag to enable PSlice extraction
+//#define PSLICE_CONSTRUCT	// ATTA: uncomment this flag to enable PSlice extraction
+
+#define ENABLE_PREFETCH
+#ifdef ENABLE_PREFETCH
+#define ENABLE_AMPM
+#define DUMP_HARD_PREF_ADDRESS
+#endif // ENABLE_PREFETCH
+
+enum HIT_LEVEL {
+	L1 = 0, L2, L3, MEMORY, InvalidLevel, LoadForward
+};
 
 #define DELINQUENT_LOAD		// ATTA: uncomment this flag to enable producing PCs for potential delinquent loads.
 #ifdef DELINQUENT_LOAD
@@ -195,6 +205,9 @@ public: //private:		// ATTA: variables are public for debugging
     pend[1].isUsed = false;
     pend[2].isUsed = false;
 
+#ifdef DELINQUENT_LOAD
+    hitLevel = 0;
+#endif // DELINQUENT_LOAD
   }
 protected:
 public:

@@ -31,7 +31,9 @@ PsliceConstructor::PsliceConstructor(string pcs_filename) {
 	currentIter.resize(pcSet.size());
 	activePslices.resize(pcSet.size());
 	allPslices.resize(pcSet.size());
+#ifdef TARGETS
 	targetAddresses.resize(pcSet.size() * 2); // ATTA: we're creating two lists: Mcore and Pcore
+#endif // TARGETS
 
 	set<AddrType>::iterator it;
 	int i = 0;
@@ -48,6 +50,7 @@ void PsliceConstructor::recieveInstruction(FlowID fid, AddrType PC,
 		uint32_t dst_val, uint32_t impl_val, bool isBranch, bool isCond,
 		bool taken, AddrType targetAddr) {
 
+#ifdef TARGETS
 	// Let's insert the loaded address into the corresponding target address list
 	for (int i = 0; i < delinqPCs.size(); i++) {
 		if (delinqPCs[i] == PC) {
@@ -57,6 +60,7 @@ void PsliceConstructor::recieveInstruction(FlowID fid, AddrType PC,
 			targetAddresses[k].push_back(addr);
 		}
 	}
+#endif // TARGETS
 
 #ifndef TARGETS_ONLY
 	// Are we constructing any Pslices now?
@@ -110,7 +114,9 @@ void PsliceConstructor::recieveInstruction(FlowID fid, AddrType PC,
 
 				// If none turn out to be similar, then let's insert this p-slice in the set.
 				if (activePslices[i]) {
+#ifdef CONSTRUCT_PSLICE
 					activePslices[i]->generatePslice();
+#endif // CONSTRUCT_PSLICE
 					allPslices[i].insert(activePslices[i]);
 					activePslices[i] = 0;
 				}
@@ -156,10 +162,13 @@ PsliceConstructor::~PsliceConstructor() {
 		}
 	}
 
+#ifdef TARGETS
 	// Dump target addresses
 	dumpTargetAddresses();
+#endif // TARGETS
 }
 
+#ifdef TARGETS
 void PsliceConstructor::dumpTargetAddresses(unsigned int delinquentLdID,
 		FlowID fid) {
 
@@ -208,3 +217,4 @@ void PsliceConstructor::dumpTargetAddresses() {
 	}
 	return;
 }
+#endif // TARGETS

@@ -17,7 +17,8 @@
 
 using namespace std;
 
-#define PSLICE_MAX_SIZE 1000
+#define PSLICE_MAX_SIZE 300
+//#define CONSTRUCT_PSLICE
 
 class Pslice {
 public:
@@ -59,7 +60,9 @@ public:
 	int iterationNumber;
 	unsigned int frequency;
 	list<ExecIns> ptrace;	// A list of all instructions that are part of the original program execution
+#ifdef CONSTRUCT_PSLICE
 	list<ExecIns> pslice;	// A slimmed down version of the main thread which includes only instructions which contribute to the generation of the prefetch address.
+#endif // CONSTRUCT_PSLICE
 	unsigned int loadStores;	// A counter for the instructions included in the pslice only because of being a load/store
 	list<AddrType> signature;
 
@@ -82,12 +85,16 @@ public:
 	}
 
 	bool dumpPtrace();
+#ifdef CONSTRUCT_PSLICE
 	bool dumpPslice();
+#endif // CONSTRUCT_PSLICE
 
 	void dumpToFile();
 
 	void identifyPtraceLiveIns();
+#ifdef CONSTRUCT_PSLICE
 	void identifyPsliceLiveIns();
+#endif // CONSTRUCT_PSLICE
 
 	bool isEqual(Pslice* other);
 	bool operator==(Pslice& other);
@@ -96,8 +103,10 @@ public:
 	//bool compare(const Pslice* other);
 
 	void generatePtraceSignature(); // Computes the signature of the ptrace
+#ifdef CONSTRUCT_PSLICE
 	void generatePsliceSignature(); // Computes the signature of this p-slice
 	void generatePslice();	// Constructs a shrinked version of the p-slice which includes only instructions that affect the prefetch address.
+#endif // CONSTRUCT_PSLICE
 };
 
 // For a specific delinquent load, all p-slices are examined to extract a global memory map.

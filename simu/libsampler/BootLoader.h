@@ -28,7 +28,6 @@ Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
 class BootLoader {
  private:
-  static char *reportFile;
   static timeval stTime;
   static PowerModel  *pwrmodel; 
   static bool doPower;
@@ -42,6 +41,7 @@ class BootLoader {
   static void createSimuInterface(const char *section, FlowID i);
 
  public:
+  static char *reportFile;
   static EmuSampler *getSampler(const char *section, const char *keyword, EmulInterface *eint, FlowID fid);
 
   static void plug(int argc, const char **argv);

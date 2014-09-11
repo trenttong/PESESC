@@ -196,7 +196,7 @@ Processor::Processor(ParseXML *XML_interface)
   if (numL3 >0)
     for (i = 0;i < numL3; i++)
       {
-        l3array.push_back(new SharedCache(XML,i, &interface_ip, L3));
+        l3array.push_back(new SharedCache(XML,i, &interface_ip, Level_3));
         l3array[i]->computeEnergy();
         l3array[i]->computeEnergy(false);
         if (procdynp.homoL3){

@@ -107,8 +107,8 @@ enum Scheduler_type {
 };
 
 enum cache_level{
-    L2,
-    L3,
+    Level_2,
+    Level_3,
     L1Directory,
     L2Directory,
 		STLB,

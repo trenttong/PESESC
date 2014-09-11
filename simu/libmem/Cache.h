@@ -125,6 +125,15 @@ protected:
   GStatsCntr  capInvalidateMiss;
   GStatsCntr  invalidateHit;
   GStatsCntr  invalidateMiss;
+
+  // =======================
+  // ATTA: statistic for prefetching
+  GStatsCntr  allocHardwPref;
+  GStatsCntr  allocPcorePref;
+  GStatsCntr  accessHardwPref;
+  GStatsCntr  accessPcorePref;
+  // =======================
+
   // END Statistics
 
   Time_t max(Time_t a, Time_t b) const { return a<b? b : a; }
@@ -208,6 +217,35 @@ public:
   virtual TimeDelta_t ffread(AddrType addr, DataType data);
   virtual TimeDelta_t ffwrite(AddrType addr, DataType data);
   virtual void        ffinvalidate(AddrType addr, int32_t lineSize);
+
+#ifdef ENABLE_PREFETCH
+  void prefetch(AddrType addr) {
+    MemRequest *prefetch_mreq=MemRequest::createRead(this, 0, addr, 0);
+	prefetch_mreq->markPrefetch();
+	router->fwdBusRead(prefetch_mreq, missDelay);
+#ifdef DUMP_HARD_PREF_ADDRESS
+	insertPrefAddress(addr);
+#endif // DUMP_HARD_PREF_ADDRESS
+  }
+  list<AddrType> prefAddresses; // A prefetch address list.
+  void insertPrefAddress(AddrType);
+  void dumpPrefAddresses();
+
+  virtual int getExtraBit(AddrType addr) {
+	  Line* l = cacheBank->findLineNoEffect(addr);
+	  if(!l) return -1;
+	  else return l->getExtraBit();
+  }
+  virtual void resetExtraBit(AddrType addr) {
+	 Line* l = cacheBank->findLineNoEffect(addr);
+	 if(l) l->resetExtraBit();
+  }
+  virtual void setExtraBit(AddrType addr) {
+	 Line* l = cacheBank->findLineNoEffect(addr);
+	 if(l) l->setExtraBit();
+  }
+
+#endif // ENABLE_PREFETCH
 
 };
 

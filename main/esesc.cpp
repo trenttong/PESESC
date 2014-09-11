@@ -35,7 +35,12 @@ Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
 char *ptrace_name = NULL;
 char *pslice_name = NULL;
+char *sppslice_name = NULL;
 bool disable_pcore = false;
+char *globalReportFile = NULL;
+unsigned int runAheadThreshold = 1000;
+long int max_sbytes_size = 0;
+
 int main(int argc, const char **argv) { 
 
    /* parse the ptrace and pslice file names */
@@ -44,10 +49,13 @@ int main(int argc, const char **argv) {
   {
      if (!strncmp(argv[idx], "-pslice", strlen("-pslice"))) pslice_name = (char*)argv[++idx];
      if (!strncmp(argv[idx], "-ptrace", strlen("-ptrace"))) ptrace_name = (char*)argv[++idx];
+     if (!strncmp(argv[idx], "-sppslice", strlen("-spplice"))) sppslice_name = (char*)argv[++idx];
      if (!strncmp(argv[idx], "-disable_pcore", strlen("-disable_pcore"))) disable_pcore = true;
+     if (!strncmp(argv[idx], "-rh", strlen("-rh"))) runAheadThreshold = (unsigned int) atoi(argv[++idx]);
   }
 
   BootLoader::plug(argc, argv);
+  globalReportFile = (char*) BootLoader::reportFile;
   BootLoader::boot();
   BootLoader::report("done");
   BootLoader::unboot();

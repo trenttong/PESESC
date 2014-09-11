@@ -20,6 +20,16 @@ Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
 #include <signal.h>
+#include <string>
+using namespace std;
+
+extern unsigned int runAheadThreshold;	// ATTA: the maximum run ahead distance allowed.
+extern bool disable_pcore;
+extern char* sppslice_name;
+extern char *globalReportFile;
+extern unsigned int max_sbytes_size;
+
+#include "PrefetchInterface.h"
 
 #include "BootLoader.h"
 
@@ -156,6 +166,61 @@ void BootLoader::report(const char *str) {
   Report::field("OSSim:msecs=%8.2f" ,(double)msecs / 1000);
 
   GStats::report(str);
+
+  // =================================================
+  // ATTA: producing my short version of the report
+#define statListCount 26
+  string statsList[statListCount] = {
+	  "P(0):nCommitted",
+	  "P(0):clockTicks",
+	  "L3:readHit",
+	  "L3:readHalfMiss",
+	  "L3:readMiss",
+	  "L3:writeHit",
+	  "L3:writeHalfMiss",
+	  "L3:writeMiss",
+	  "L2(0):readHit",
+	  "L2(0):readHalfMiss",
+	  "L2(0):readMiss",
+	  "L2(0):writeHit",
+	  "L2(0):writeHalfMiss",
+	  "L2(0):writeMiss",
+	  "DL1(0):readHit",
+	  "DL1(0):readHalfMiss",
+	  "DL1(0):readMiss",
+	  "DL1(0):writeHit",
+	  "DL1(0):writeHalfMiss",
+	  "DL1(0):writeMiss",
+	  "L3:allocHardwPref",
+	  "L3:allocPcorePref",
+	  "L2(0):allocHardwPref",
+	  "L2(0):allocPcorePref",
+	  "DL1(0):allocHardwPref",
+	  "DL1(0):allocPcorePref"
+  };
+
+  FILE* statFile;
+  string statFileName = (string) globalReportFile;
+  statFileName += ".stat";
+  statFile = fopen(statFileName.c_str(), "w");
+  if(!statFile)
+  {
+	  fprintf(stderr, "ERROR opening status file %s\n", statFileName.c_str());
+  }
+  else {
+	  // Print start and end times.
+	  //fprintf(statFile, "%s\t", ctime(&stTime.tv_sec));
+	  //fprintf(statFile, "%s\t", ctime(&endTime.tv_sec));
+	  //fprintf(statFile, "%u\t", runAheadThreshold);
+	  for(int i = 0; i< statListCount; i++){
+		  fprintf(statFile, "%ld\t", (long)((GStatsCntr*) GStats::getRef(statsList[i].c_str()))->getValue());
+	  }
+	  // Print maximum Pcore store buffer size.
+	  fprintf(statFile, "%ld\t", max_sbytes_size);
+	  fclose(statFile);
+  }
+  // =================================================
+
 
   Report::close();
 }
@@ -332,6 +397,12 @@ void BootLoader::createSimuInterface(const char *section, FlowID i) {
   }
   gms->buildMemorySystem();
 
+  // ATTA: connecting prefetchers to caches.
+  string l1p = (string(SescConf->getCharPtr("Prefetchers", "L1_prefetcher")));
+  string l2p = (string(SescConf->getCharPtr("Prefetchers", "L2_prefetcher")));
+  string l3p = (string(SescConf->getCharPtr("Prefetchers", "L3_prefetcher")));
+  PrefetchInterface::InitialzeTypes(l1p, l2p, l3p);
+
   CPU_t cpuid = static_cast<CPU_t>(i);
 
   GProcessor  *gproc = 0;
@@ -383,7 +454,13 @@ void BootLoader::plug(int argc, const char **argv) {
     sprintf(reportFile,"esesc_%s_%s.XXXXXX",tmp,tmp2);
   }else{
     reportFile = (char *)malloc(30 + strlen(tmp));
-    sprintf(reportFile,"esesc_%s.XXXXXX",tmp);
+    if(disable_pcore)
+	  sprintf(reportFile,"esesc_%s.XXXXXX",tmp);
+	else
+		if(sppslice_name)
+			sprintf(reportFile,"esesc_%s_sppcore_rh%u.XXXXXX",tmp, runAheadThreshold);
+		else
+			sprintf(reportFile,"esesc_%s_pcore_rh%u.XXXXXX",tmp, runAheadThreshold);
   }
 
   Report::openFile(reportFile);

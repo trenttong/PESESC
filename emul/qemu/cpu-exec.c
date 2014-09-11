@@ -23,6 +23,9 @@
 #include "qemu-barrier.h"
 #include "qemu-stats.h"
 
+extern unsigned int runAheadThreshold;	// ATTA: the maximum run ahead distance allowed.
+extern unsigned int max_sbytes_size;
+
 int tb_invalidated_flag;
 
 //#define CONFIG_DEBUG_EXEC
@@ -262,10 +265,10 @@ volatile sig_atomic_t exit_request;
 FILE *ssio = NULL;
 
 /* record the # of instructions executed */
-static void qemu_single_step_dump(CPUState *env)
-{
-///    dump_states(env);
-}
+//static void qemu_single_step_dump(CPUState *env)
+//{
+//    dump_states(env);
+//}
 
 /// monitor every executed instruction for ptrace entry.
 static bool qemu_entry_pc_monitor(CPUState *env)
@@ -315,6 +318,25 @@ static TranslationBlock *qemu_skip_pc_monitor(CPUState *env, TranslationBlock *t
    return tb; 
 }
 
+/// fetch the next pc from sppslice
+static TranslationBlock *qemu_next_pc_sppslice(CPUState *env, TranslationBlock *tb)
+{
+	/* only prefetch core is allowed to skip */
+	assert(ISPCORE(env));
+
+	if(env->current_sppslice_pc_idx == env->sppslice_pc_idx-1 )	// We're still in the first iteration
+		env->current_sppslice_pc_idx = 0;
+	else
+	{
+		env->current_sppslice_pc_idx++;
+	}
+	if(env->regs[15] == env->sppslice_pc[env->current_sppslice_pc_idx])
+		return tb;
+
+	env->regs[15] = env->sppslice_pc[env->current_sppslice_pc_idx];
+	return tb_find_fast(env);
+}
+
 /// xtrace_init_cpu_tp - initialize a CPU tracepoint strucutre.
 static void xtrace_reset_trace_point(CPUTracePoint *tp)
 {
@@ -343,6 +365,7 @@ static void xtrace_reset_trace_points(CPUState *env)
    int i, cnt = env->xtrace_op_cnt;
    for(i=0; i<=cnt; ++i) xtrace_reset_trace_point(&env->xtrace_op_tp[i]); 
    env->xtrace_op_cnt = 0;
+   env->bogus_record = 0;
 }
 
 /// xtrm_trace_sanity_check - This function performs some sanity
@@ -561,10 +584,14 @@ static void xtrm_trace_print(CPUState *env)
 #undef HEARTBEAT_FREQ
 #endif
 
+int prefetchAccuracy;
+int confidence = 3;
+bool sppsliceAllowed = true;
+
+const char *dbgm = "[PREFETCH-DEBUG]";
 /* create a temporary prefetch core */
 static void qemu_cpu_create_pcore(CPUState *env) 
 {
-   const char *dbgm = "[PREFETCH-DEBUG]";
    /* pcore can not create pcore */
    assert(!ISPCORE(env));
    assert(ISPCORE(env->PCore));
@@ -574,11 +601,13 @@ static void qemu_cpu_create_pcore(CPUState *env)
 
    /* some states of the PCORE is different from MCORE */
    env->PCore->IsPCore = 1;
+   env->PCore->sbytes_size = 0;
    env->PCore->PCore   = 0;
    env->PCore->MCore   = env;
    env->PCore->processor_state = IN_TRACE;
    env->PCore->prefetchDistance = 0;
    //env->PCore->fid = 1;
+   prefetchAccuracy = runAheadThreshold / 2;
    printf("%s PCore created\n", dbgm);
 }
 
@@ -588,15 +617,33 @@ static void qemu_cpu_destroy_pcore(CPUState *env)
    /* make sure we are destroying a PCORE */
    assert(ISPCORE(env));
    env->processor_state = PRE_TRACE;
+   printf("%s PCore destroyed, MaxPrefetchDistance = %lld\n", dbgm, env->MCore->maxPrefetchDistance);
    memset(env->sbytes, 0, sizeof(MemoryByte*)*MEMBYTE_BUCKET_NUM);
-   printf("%s PCore destroyed\n", dbgm);
+
 }
 
 #define MAX_PC_COUNT 4096 
+#define HAS_SPPSLICE() (sppslice)
+
+target_ulong *prefetch_address = NULL;
+target_ulong prefetch_address_idx = 0;
+
+static int findAddressInPrefetchBuffer(target_ulong laddr, int currentAccuracy) {
+	int i;
+	for(i=0; i< runAheadThreshold; i++)
+		if(prefetch_address[i] == laddr)
+		{
+			return currentAccuracy/2;
+		}
+	return -1;
+}
+
 static FILE *ptrace = NULL;
 static FILE *pslice = NULL;
+static FILE *sppslice = NULL;
 extern char *ptrace_name;
 extern char *pslice_name;
+extern char *sppslice_name;
 extern bool disable_pcore;
 static void parse_file_to_pcs(CPUState *env)
 {
@@ -606,6 +653,9 @@ static void parse_file_to_pcs(CPUState *env)
     	return ;
     }
 
+    const char* dbgm = "[PREFETCH-DEBUG]";
+    if (ptrace_name && pslice_name) 
+    {
     printf("Opening ptrace %s and pslice file %s\n", ptrace_name, pslice_name);
     ptrace = fopen(ptrace_name, "r");
     pslice = fopen(pslice_name, "r");
@@ -644,7 +694,6 @@ static void parse_file_to_pcs(CPUState *env)
        if (!found) askip_pc[askip_idx++] = trace_pc[n];
     }
 
-    const char* dbgm = "[PREFETCH-DEBUG]";
     /* handle entry pc */
     env->stop_pc[env->stop_pc_idx++] = trace_pc[0];
     printf("%s entry pc is 0x%lx\n", dbgm, (long int) trace_pc[0]);
@@ -666,6 +715,32 @@ static void parse_file_to_pcs(CPUState *env)
        perror("you are skipping everything. prefetch core will stuck\n");
        exit(0);
     }
+    }
+
+
+    if (sppslice_name) 
+    {
+    int n=0;
+    sppslice = fopen(sppslice_name, "r");
+    assert(sppslice && "sppslice not provided properly");
+
+    int sppslice_pc[MAX_PC_COUNT];
+    int sppslice_idx = 0;
+    while (!feof(sppslice)) fscanf(sppslice, "%x", &sppslice_pc[sppslice_idx++]);
+
+    /* handle entry pc */
+    env->stop_pc[env->stop_pc_idx++] = sppslice_pc[0];
+    printf("%s entry pc is 0x%lx\n", dbgm, (long int) sppslice_pc[0]);
+
+    for(n=0; n<sppslice_idx-1; n++) 
+    {
+      env->sppslice_pc[env->sppslice_pc_idx++] = sppslice_pc[n];
+      printf("%s sppslice_pc has 0x%lx\n", dbgm, (long int) sppslice_pc[n]);
+    }
+    env->current_sppslice_pc_idx = env->sppslice_pc_idx - 1;
+
+    }
+
     /* done */
     return;
 }
@@ -683,8 +758,11 @@ int cpu_exec(CPUState *env, CPUState **next_env)
     /* reset the # of instructions to execute */
     env->InstQuatum = ROUNDROBIN_EXECUTION_SLICE; 
 
-    if (!ptrace && !pslice) parse_file_to_pcs(env);
+    if (!ptrace && !pslice && !sppslice) parse_file_to_pcs(env);
     ///if (0) parse_file_to_pcs(env);
+
+    if (!prefetch_address) prefetch_address = malloc(sizeof(target_ulong) * runAheadThreshold);
+    prefetchAccuracy = runAheadThreshold / 2;
 
     if (env->halted) {
         if (!cpu_has_work(env)) {
@@ -1086,7 +1164,7 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                     if (!ISPCORE(env) && IS_PRETRACE(env) && qemu_entry_pc_monitor(env)) 
                     {
                        /* Check whether MCore has consumed enough of the Prefetches or not before creating a new Pcore */
-                       if(env->PCore->prefetchDistance <= 0)
+                       if(env->PCore->prefetchDistance <= 0 && (!HAS_SPPSLICE() || (HAS_SPPSLICE() && sppsliceAllowed)))
                        {
                     	  //printf("%s PrefetchDistance: Max %lld, current %lld \n", dbgm, env->maxPrefetchDistance, env->PCore->prefetchDistance);
                           /* create the prefetch core and hope it can run ahead and do something useful*/
@@ -1094,7 +1172,7 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                           /* the system is in trace now */
                           env->processor_state = IN_TRACE;
                           /* print  the trace enter */
-                          //printf("%s stop point hit at 0x%lx\n", dbgm, (long int)GET_PC(env));
+                          printf("%s stop point hit at 0x%lx\n", dbgm, (long int)GET_PC(env));
                           //printf("%s entered in-trace mode. singlestep log in %s\n", dbgm, logname);
                        }
                     }
@@ -1102,13 +1180,14 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                     /// --------------------------------------------------- ///
                     /* monitor for exit pc */
                     /// --------------------------------------------------- ///
-                    if(ISPCORE(env) && IS_INTRACE(env) && qemu_exit_pc_monitor(env)) 
+                    if(ISPCORE(env) && !HAS_SPPSLICE() && IS_INTRACE(env) && qemu_exit_pc_monitor(env))
                     {
                        //printf("%s PrefetchDistance: Max %lld, current %lld \n", dbgm, env->MCore->maxPrefetchDistance, env->prefetchDistance);
                        /* the system is post (off) trace now */
                        env->processor_state = PRE_TRACE;
                        env->InstQuatum = 0;
                        env->MCore->processor_state = PRE_TRACE;
+                       max_sbytes_size = (max_sbytes_size < env->sbytes_size) ? env->sbytes_size : max_sbytes_size;
                        /* shutdown the prefetch core */
                        qemu_cpu_destroy_pcore(env);
                        /* log it */
@@ -1116,17 +1195,38 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                        //printf("%s entered post-trace mode\n", dbgm);
                        goto load_main_core;
                     }
+                    else if(ISPCORE(env) && HAS_SPPSLICE() && IS_INTRACE(env) && prefetchAccuracy <=0)
+                    {
+                       confidence--;
+                       if(!confidence) {sppsliceAllowed=false;
+                       	   printf("PREFETCH SPPSLICE NOT ALLOWED ANYMORE!\n");
+                       }
+                       env->processor_state = PRE_TRACE;
+					   env->InstQuatum = 0;
+					   env->prefetchDistance = 0;
+					   env->MCore->processor_state = PRE_TRACE;
+					   qemu_cpu_destroy_pcore(env);
+					   goto load_main_core;
+                    }
 
 
                     /// --------------------------------------------------- ///
                     /* skip this pc, and find  the next translation block ? */
                     /// --------------------------------------------------- ///
                     TranslationBlock *new_tb = NULL;
-                    while (ISPCORE(env) && IS_INTRACE(env))
+                    while (ISPCORE(env) && IS_INTRACE(env) && !HAS_SPPSLICE())
                     {
                        new_tb = qemu_skip_pc_monitor(env, tb);
                        if (new_tb == tb) break;
                        tb = new_tb;
+                    }
+
+                    /// --------------------------------------------------- ///
+                    /* for sppslice, identify next pc/tb */
+                    /// --------------------------------------------------- ///
+                    if(ISPCORE(env) && IS_INTRACE(env) && HAS_SPPSLICE())
+                    {
+                       tb = qemu_next_pc_sppslice(env, tb);
                     }
 
                     /// --------------------------------------------------- ///
@@ -1150,9 +1250,10 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                     /// --------------------------------------------------- ///
                     /* dump every instruction when in trace */
                     /// --------------------------------------------------- ///
-                    if (ISPCORE(env) && IS_INTRACE(env)) qemu_single_step_dump(env);
-
-                    printf("number of shadow bytes is %d\n", env->sbytes_size);
+                    //if (ISPCORE(env) && IS_INTRACE(env)){
+                    //	qemu_single_step_dump(env);
+                        //printf("number of shadow bytes is %d\n", env->sbytes_size);
+                    //}
                     tc_ptr = tb->tc_ptr;
                     /* execute the generated code */
                     next_tb = tcg_qemu_tb_exec(env, tc_ptr);
@@ -1167,6 +1268,7 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                     /// do some printing for verification.
                     xtrm_trace_print(env);
                     if (env) {
+
                       int i;
                       //for(i=0;i<env->op_cnt;i++) 
                       //  printf("%d pc:0x%x, insn:0x%x\n",i, env->op_pc[i], env->op_insn[i]);
@@ -1185,7 +1287,18 @@ int cpu_exec(CPUState *env, CPUState **next_env)
 
                       } else if (esesc_allow_large_tb[env->fid]==0 && esesc_single_inst_tb[env->fid] == 0) { // WARMUP
                           for(i=0;i<env->op_cnt;i++) {
-                            QEMUReader_queue_inst(0xdeadbeaf, 
+                           //if (!env->bogus_record)
+                        	  if(HAS_SPPSLICE() && env->xtrace_xp_op_tp[i].pc == env->sppslice_pc[0]){
+                        		  if(ISPCORE(env)) // Let's insert the prefetched address in the buffer
+                        		     prefetch_address[prefetch_address_idx++ % runAheadThreshold] = env->xtrace_xp_op_tp[i].memadd;
+                        		  else // Let's check whether the loaded target address matches what's in the buffer.
+                        		  {
+                        			  prefetchAccuracy += findAddressInPrefetchBuffer(env->xtrace_xp_op_tp[i].memadd, prefetchAccuracy);
+                        			  prefetchAccuracy = (prefetchAccuracy>runAheadThreshold)? runAheadThreshold:prefetchAccuracy;
+                        		  }
+                        	  }
+
+                        	                      QEMUReader_queue_inst(0xdeadbeaf,
                                                   env->xtrace_xp_op_tp[i].pc, 
                                                   env->xtrace_xp_op_tp[i].memadd, 
                                                   env->xtrace_xp_op_tp[i].memval, 
@@ -1214,7 +1327,17 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                         // FIXME: what if env->op_cnt == 0
                         for(i=0;i<env->op_cnt;i++) {
                           // the msb of op_inst indicates thumb mode for ARM
-                          QEMUReader_queue_inst(ldl_code(env->xtrace_xp_op_tp[i].pc), 
+                          //if (!env->bogus_record)
+                        	if(HAS_SPPSLICE() && env->xtrace_xp_op_tp[i].pc == env->sppslice_pc[0]){
+								  if(ISPCORE(env)) // Let's insert the prefetched address in the buffer
+									 prefetch_address[prefetch_address_idx++ % runAheadThreshold] = env->xtrace_xp_op_tp[i].memadd;
+								  else // Let's check whether the loaded target address matches what's in the buffer.
+								  {
+									  prefetchAccuracy += findAddressInPrefetchBuffer(env->xtrace_xp_op_tp[i].memadd, prefetchAccuracy);
+                                      prefetchAccuracy = (prefetchAccuracy>runAheadThreshold)? runAheadThreshold:prefetchAccuracy;
+								  }
+							  }
+                        	                    QEMUReader_queue_inst(ldl_code(env->xtrace_xp_op_tp[i].pc),
                                                 env->xtrace_xp_op_tp[i].pc, 
                                                 env->xtrace_xp_op_tp[i].memadd, 
                                                 env->xtrace_xp_op_tp[i].memval, 
@@ -1280,7 +1403,17 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                                                             ninst, (void *) env, env->IsPCore, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
                                    } else if (esesc_allow_large_tb[env->fid]==0 && esesc_single_inst_tb[env->fid] == 0) { // WARMUP
                                       for(i=0;i<env->op_cnt;i++) {
-                                         QEMUReader_queue_inst(ldl_code(env->xtrace_xp_op_tp[i].pc), 
+                                         //if (!env->bogus_record)
+                                    	  if(HAS_SPPSLICE() && env->xtrace_xp_op_tp[i].pc == env->sppslice_pc[0]){
+											  if(ISPCORE(env)) // Let's insert the prefetched address in the buffer
+												 prefetch_address[prefetch_address_idx++ % runAheadThreshold] = env->xtrace_xp_op_tp[i].memadd;
+											  else // Let's check whether the loaded target address matches what's in the buffer.
+											  {
+												  prefetchAccuracy += findAddressInPrefetchBuffer(env->xtrace_xp_op_tp[i].memadd, prefetchAccuracy);
+												  prefetchAccuracy = (prefetchAccuracy>runAheadThreshold)? runAheadThreshold:prefetchAccuracy;
+											  }
+										  }
+                                        	    QEMUReader_queue_inst(ldl_code(env->xtrace_xp_op_tp[i].pc),
                                                 env->xtrace_xp_op_tp[i].pc, 
                                                 env->xtrace_xp_op_tp[i].memadd, 
                                                 env->xtrace_xp_op_tp[i].memval, 
@@ -1308,7 +1441,17 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                                      // FIXME: what if env->op_cnt == 0
                                      for(i=0;i<env->op_cnt;i++) {
                                         // the msb of op_inst indicates thumb mode for ARM
-                                        QEMUReader_queue_inst(ldl_code(env->xtrace_xp_op_tp[i].pc), 
+                                       //if (!env->bogus_record)
+                                    	 if(HAS_SPPSLICE() && env->xtrace_xp_op_tp[i].pc == env->sppslice_pc[0]){
+											  if(ISPCORE(env)) // Let's insert the prefetched address in the buffer
+												 prefetch_address[prefetch_address_idx++ % runAheadThreshold] = env->xtrace_xp_op_tp[i].memadd;
+											  else // Let's check whether the loaded target address matches what's in the buffer.
+											  {
+												  prefetchAccuracy += findAddressInPrefetchBuffer(env->xtrace_xp_op_tp[i].memadd, prefetchAccuracy);
+												  prefetchAccuracy = (prefetchAccuracy>runAheadThreshold)? runAheadThreshold:prefetchAccuracy;
+											  }
+										  }
+                                    	        QEMUReader_queue_inst(ldl_code(env->xtrace_xp_op_tp[i].pc),
                                                 env->xtrace_xp_op_tp[i].pc, 
                                                 env->xtrace_xp_op_tp[i].memadd, 
                                                 env->xtrace_xp_op_tp[i].memval, 
@@ -1357,7 +1500,7 @@ int cpu_exec(CPUState *env, CPUState **next_env)
               env = env->MCore;
            else   // ATTA: will switch from MCore to PCore only if run-ahead distance is below threshold.
            {
-              if(env->PCore->prefetchDistance < 1000)
+              if(env->PCore->prefetchDistance < runAheadThreshold)
         	     env = env->PCore;
            }
            env->InstQuatum = ROUNDROBIN_EXECUTION_SLICE; 

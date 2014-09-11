@@ -113,8 +113,9 @@ typedef struct MemoryByte {
    when the system is in trace, i.e. mcore and pcore running 
    simulatenously */
 #define ROUNDROBIN_EXECUTION_SLICE 1
-#define ISPCORE(env) (env->IsPCore)
-#define GET_PC(env)  (env->regs[15])
+#define ISPCORE(env)    (env->IsPCore)
+#define GET_PC(env)     (env->regs[15])
+#define SET_PC(env, x)  (env->regs[15] = x;)
 /* We currently assume float and double are IEEE single and double
    precision respectively.
    Doing runtime conversions is tricky because VFP registers may contain
@@ -289,6 +290,10 @@ typedef struct CPUARMState {
     target_ulong stop_pc[MAX_ESESC_PC_COUNT];
     target_ulong skip_pc_idx;
     target_ulong skip_pc[MAX_ESESC_PC_COUNT];
+    target_ulong sppslice_pc_idx;
+    target_ulong current_sppslice_pc_idx;
+    target_ulong sppslice_pc[MAX_ESESC_PC_COUNT];
+
 
     target_ulong icount;
 
@@ -296,6 +301,12 @@ typedef struct CPUARMState {
     /* processor can be pre-trace, in-trace and post-trace */
     /// --------------------------------------------------- ///
     uint32_t processor_state;
+
+
+    /// --------------------------------------------------- ///
+    /* this record contains a bogus address */
+    /// --------------------------------------------------- ///
+    uint32_t bogus_record;
 
     /// --------------------------------------------------- ///
     /* this core is a prefetch core or main core . */
@@ -318,6 +329,7 @@ typedef struct CPUARMState {
     uint8_t  bdata;
     MemoryByte *sbytes[MEMBYTE_BUCKET_NUM];
     uint32_t sbytes_size;
+    //uint32_t max_sbytes_size;
 #endif
 
     /* iwMMXt coprocessor state.  */
