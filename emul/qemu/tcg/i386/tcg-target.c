@@ -1076,11 +1076,13 @@ extern target_ulong prefetch_address_idx ;
 #include <unistd.h>
 #include <sys/mman.h>
 
+/*
 static bool is_valid_address(void *p)
 {
    unsigned char vec = 0;
    return -1 != mincore(p, getpagesize(), &vec);
 }
+*/
 
 static char fetch_translated_linear(CPUState *env, void *p)
 {
@@ -1092,12 +1094,15 @@ static char fetch_translated_linear(CPUState *env, void *p)
        head = head->next;
     }
 
-    if (is_valid_address(p))  return *(char*)p;
+    //if (is_valid_address(p))  
+	return *(char*)p;
 
     /* this is not a valid address */
-    env->bogus_record = 1;
-    return 0;
+    //env->bogus_record = 1;
+    //return 0;
 }
+
+extern unsigned int runAheadThreshold;	// ATTA: the maximum run ahead distance allowed.
 
 static void esesc_shadow_load_process(CPUState *env)
 {
@@ -1109,7 +1114,7 @@ static void esesc_shadow_load_process(CPUState *env)
        env->ld_databytes[i] = fetch_translated_linear(env, (void*)(intptr_t)(env->ld_linear+i));
     }
 
-    prefetch_address[prefetch_address_idx++ % 1024] = env->ld_linear;
+    prefetch_address[prefetch_address_idx++ % runAheadThreshold] = env->ld_linear;
     return;
 }
 
@@ -1537,8 +1542,9 @@ static void esesc_shadow_store_process(CPUState *env)
        env->bdata   = env->st_databytes[idx];
 
        /* this is a valid address */
-       if (is_valid_address((void*)(uintptr_t)env->blinear)) esesc_shadow_store_process_byte(env);
-       else env->bogus_record = 1;
+       //if (is_valid_address((void*)(uintptr_t)env->blinear)) 
+	   esesc_shadow_store_process_byte(env);
+       //else env->bogus_record = 1;
     }
     return;
 }
