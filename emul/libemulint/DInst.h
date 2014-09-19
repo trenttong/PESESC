@@ -46,12 +46,12 @@ class EmulInterface;
 #define PRINT_TOTALINST
 #endif // PRINT_CLOCKTICKS
 
-//#define PSLICE_CONSTRUCT	// ATTA: uncomment this flag to enable PSlice extraction
+#define PSLICE_CONSTRUCT	// ATTA: uncomment this flag to enable PSlice extraction
 
 #define ENABLE_PREFETCH
 #ifdef ENABLE_PREFETCH
 #define ENABLE_AMPM
-#define DUMP_HARD_PREF_ADDRESS
+//#define DUMP_HARD_PREF_ADDRESS
 #endif // ENABLE_PREFETCH
 
 enum HIT_LEVEL {

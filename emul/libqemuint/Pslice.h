@@ -10,6 +10,7 @@
 #define PSLICE_H_
 
 #include <list>
+#include <set>
 #include <stdio.h>
 #include <string>
 #include <map>
@@ -60,6 +61,8 @@ public:
 	int iterationNumber;
 	unsigned int frequency;
 	list<ExecIns> ptrace;	// A list of all instructions that are part of the original program execution
+	set<AddrType> ptrace_set;
+
 #ifdef CONSTRUCT_PSLICE
 	list<ExecIns> pslice;	// A slimmed down version of the main thread which includes only instructions which contribute to the generation of the prefetch address.
 #endif // CONSTRUCT_PSLICE

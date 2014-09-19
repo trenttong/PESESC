@@ -44,6 +44,7 @@ void Pslice::insertInst(AddrType pc, uint32_t insn, AddrType addr,
 	ins.targetAddr = targetAddr;
 
 	ptrace.push_back(ins);
+	ptrace_set.insert(pc);
 }
 
 void Pslice::dumpToFile() {
@@ -137,20 +138,7 @@ bool Pslice::dumpPtrace() {
 		fprintf(stderr, "OOPS: ptrace file could not be created!\n");
 		return false;
 	}
-/*
-	// Generate and print the signature
-	generatePtraceSignature();
-	fprintf(csv, "%u", (unsigned int) signature.size());
-	list<AddrType>::iterator sigit;
-	for (sigit = signature.begin(); sigit != signature.end(); sigit++) {
-		fprintf(csv, ",%u", (unsigned int) (*sigit));
-	}
-	fprintf(csv, "\n");
-*/
-/*
-	// Print the frequency of this pslice
-	fprintf(csv, "%u\n", frequency);
-*/
+
 	// Print input live Ins
 	identifyPtraceLiveIns();
 	fprintf(csv, "%u\n", numberOfLiveIns);
@@ -265,22 +253,25 @@ void Pslice::identifyPsliceLiveIns() {
 // Compares two Pslices and determines if they are exactly the same based on the sequence of PCs
 // Note that the basic assumption is that both Pslices belong to the same delinquent PC.
 bool Pslice::isEqual(Pslice* other) {
-	list<ExecIns>::iterator myit;
-	list<ExecIns>::iterator otherit;
 
-	myit = ptrace.begin();
-	otherit = other->ptrace.begin();
+	// Quick test
+	if(ptrace_set.size() != other->ptrace_set.size())
+		return false;
 
-	while (myit != ptrace.end()) {
+	set<AddrType>::iterator mySetIt;
+	set<AddrType>::iterator otherSetIt;
 
-		AddrType myPC = (*myit).PC;
-		AddrType otherPC = (*otherit).PC;
+	// Now compare both sets together.
+	mySetIt = ptrace_set.begin();
+	otherSetIt = other->ptrace_set.begin();
 
-		if (myPC != otherPC)
+	while (mySetIt != ptrace_set.end()) {
+
+		if ((*mySetIt) != (*otherSetIt))
 			return false;
 
-		myit++;
-		otherit++;
+		mySetIt++;
+		otherSetIt++;
 	}
 
 	return true;
@@ -393,7 +384,7 @@ void Pslice::generatePsliceSignature() {
 		// We use a simple address jump detector; if an instructions PC is more than 4 bytes more than
 		// the prior instruction, then it's a jump.
 		if ((*it).PC > lastPC + 4)
-			signature.push_back((*it).PC);
+		signature.push_back((*it).PC);
 		else {
 			if (((*it).isCond)) {
 				list<ExecIns>::iterator nextInstIt = it;
@@ -452,7 +443,7 @@ void Pslice::generatePslice() {
 
 	bool depRegisters[INVALID_ARM_REG + 1];
 	for (int i = 0; i < INVALID_ARM_REG; i++)
-		depRegisters[i] = false;
+	depRegisters[i] = false;
 
 	list<ExecIns>::reverse_iterator rit;
 	rit = ptrace.rbegin();
@@ -477,11 +468,11 @@ void Pslice::generatePslice() {
 				/*|| (*rit).addr != ARM_INVALID_MEMADD*/) {
 
 			if (!(depRegisters[(*rit).dst_reg]
-					&& (*rit).dst_reg != INVALID_ARM_REG))
-				loadStores++;
+							&& (*rit).dst_reg != INVALID_ARM_REG))
+			loadStores++;
 
 			depRegisters[(*rit).dst_reg] = false; // We can now remove the destination register from the dependency list.
-			depRegisters[(*rit).src1_reg] = true; // Add all source registers to the dependency list.
+			depRegisters[(*rit).src1_reg] = true;// Add all source registers to the dependency list.
 			depRegisters[(*rit).src2_reg] = true;
 			depRegisters[(*rit).src3_reg] = true;
 			depRegisters[(*rit).impl_reg] = true;
