@@ -33,12 +33,21 @@ Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
 #include "BootLoader.h"
 
+char *pslice_list[10];
+int pslice_count = 0;
+
+char *ptrace_list[10];
+int ptrace_count = 0;
+
+char *sppslice_list[10];
+int sppslice_count = 0;
+
 char *ptrace_name = NULL;
 char *pslice_name = NULL;
 char *sppslice_name = NULL;
 bool disable_pcore = false;
 char *globalReportFile = NULL;
-unsigned int runAheadThreshold = 1000;
+unsigned int runAheadThreshold = 256;
 long int max_sbytes_size = 0;
 
 int main(int argc, const char **argv) { 
@@ -47,9 +56,18 @@ int main(int argc, const char **argv) {
   int idx;
   for(idx=0; idx<argc; idx++) 
   {
-     if (!strncmp(argv[idx], "-pslice", strlen("-pslice"))) pslice_name = (char*)argv[++idx];
-     if (!strncmp(argv[idx], "-ptrace", strlen("-ptrace"))) ptrace_name = (char*)argv[++idx];
-     if (!strncmp(argv[idx], "-sppslice", strlen("-spplice"))) sppslice_name = (char*)argv[++idx];
+     if (!strncmp(argv[idx], "-pslice", strlen("-pslice"))) {
+    	 pslice_name = (char*)argv[++idx];
+    	 pslice_list[pslice_count++] = pslice_name;
+     }
+     if (!strncmp(argv[idx], "-ptrace", strlen("-ptrace"))) {
+    	 ptrace_name = (char*)argv[++idx];
+    	 ptrace_list[ptrace_count++] = ptrace_name;
+     }
+     if (!strncmp(argv[idx], "-sppslice", strlen("-spplice"))) {
+    	 sppslice_name = (char*)argv[++idx];
+    	 sppslice_list[sppslice_count++] == sppslice_name;
+     }
      if (!strncmp(argv[idx], "-disable_pcore", strlen("-disable_pcore"))) disable_pcore = true;
      if (!strncmp(argv[idx], "-rh", strlen("-rh"))) runAheadThreshold = (unsigned int) atoi(argv[++idx]);
   }

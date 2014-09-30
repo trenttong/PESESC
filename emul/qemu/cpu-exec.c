@@ -588,7 +588,14 @@ int prefetchAccuracy;
 int confidence = 3;
 bool sppsliceAllowed = true;
 
-const char *dbgm = "[PREFETCH-DEBUG]";
+
+//#define ENABLE_DEBUG
+#ifdef ENABLE_DEBUG
+#	define DEBUG_MSG(M, ...) fprintf(stderr, "[PREFETCH-DBG] %s:%d: " M "\n", __FILE__, __LINE__, ##__VA_ARGS__)
+#else
+#	define DEBUG_MSG(M, ...)
+#endif // ENABLE_DEBUG
+
 /* create a temporary prefetch core */
 static void qemu_cpu_create_pcore(CPUState *env) 
 {
@@ -606,18 +613,18 @@ static void qemu_cpu_create_pcore(CPUState *env)
    env->PCore->MCore   = env;
    env->PCore->processor_state = IN_TRACE;
    env->PCore->prefetchDistance = 0;
+   env->maxPrefetchDistance = 0;
    //env->PCore->fid = 1;
    prefetchAccuracy = runAheadThreshold / 2;
-   printf("%s PCore created\n", dbgm);
+   DEBUG_MSG("PCore created\n");
 }
 
 static void qemu_cpu_destroy_pcore(CPUState *env) 
 {
-   const char *dbgm = "[PREFETCH-DEBUG]";
    /* make sure we are destroying a PCORE */
    assert(ISPCORE(env));
    env->processor_state = PRE_TRACE;
-   printf("%s PCore destroyed, MaxPrefetchDistance = %lld\n", dbgm, env->MCore->maxPrefetchDistance);
+   DEBUG_MSG("PCore destroyed, MaxPrefetchDistance = %lld\n", env->MCore->maxPrefetchDistance);
    memset(env->sbytes, 0, sizeof(MemoryByte*)*MEMBYTE_BUCKET_NUM);
 
 }
@@ -641,105 +648,118 @@ static int findAddressInPrefetchBuffer(target_ulong laddr, int currentAccuracy) 
 static FILE *ptrace = NULL;
 static FILE *pslice = NULL;
 static FILE *sppslice = NULL;
-extern char *ptrace_name;
-extern char *pslice_name;
+extern char *ptrace_list[10];
+extern int ptrace_count;
+extern char *pslice_list[10];
+extern int pslice_count;
 extern char *sppslice_name;
 extern bool disable_pcore;
 static void parse_file_to_pcs(CPUState *env)
 {
-    /* do not do anything, pcore is disabled */
+    // Do not do anything, pcore is disabled
     if (disable_pcore) {
     	//printf("PCore disabled.\n");
-    	return ;
+        return ;
     }
 
-    const char* dbgm = "[PREFETCH-DEBUG]";
-    if (ptrace_name && pslice_name) 
+    // Create pslice/ptrace pairs.
+    int i;
+    for(i = 0; i< pslice_count && pslice_count == ptrace_count; i++)
     {
-    printf("Opening ptrace %s and pslice file %s\n", ptrace_name, pslice_name);
-    ptrace = fopen(ptrace_name, "r");
-    pslice = fopen(pslice_name, "r");
+       // Open files.
+       DEBUG_MSG("Opening ptrace %s and pslice files %s", ptrace_list[i], pslice_list[i]);
+       ptrace = fopen(ptrace_list[i], "r");
+       pslice = fopen(pslice_list[i], "r");
 
-    assert(ptrace && pslice && "ptrace or pslice not provided properly");
+       assert(ptrace && pslice && "ptrace or pslice file not provided properly");
 
-    /* the first pc is the entry pc */
-    int askip_pc[MAX_PC_COUNT];
-    int trace_pc[MAX_PC_COUNT];
-    int slice_pc[MAX_PC_COUNT];
-    memset(askip_pc, 0, MAX_PC_COUNT*sizeof(int));
-    memset(trace_pc, 0, MAX_PC_COUNT*sizeof(int));
-    memset(slice_pc, 0, MAX_PC_COUNT*sizeof(int));
+       // Temporary arrays.
+       int trace_pc[MAX_PC_COUNT];   // ptrace instructions
+       int slice_pc[MAX_PC_COUNT];   // pslice instructions
+       int askip_pc[MAX_PC_COUNT];   // skip; instructions in the ptrace but on in the pslice
+       memset(trace_pc, 0, MAX_PC_COUNT*sizeof(int));
+       memset(slice_pc, 0, MAX_PC_COUNT*sizeof(int));
+       memset(askip_pc, 0, MAX_PC_COUNT*sizeof(int));
 
-    int trace_idx=0;
-    int slice_idx=0;
-    while (!feof(ptrace)) fscanf(ptrace, "%x", &trace_pc[trace_idx++]);
-    while (!feof(pslice)) fscanf(pslice, "%x", &slice_pc[slice_idx++]);
+       // Read ptrace and pslice instructions
+       int trace_idx=0;
+       int slice_idx=0;
+       while (!feof(ptrace)) fscanf(ptrace, "%x", &trace_pc[trace_idx++]);
+       while (!feof(pslice)) fscanf(pslice, "%x", &slice_pc[slice_idx++]);
 
-    if (trace_idx >= MAX_PC_COUNT || slice_idx >= MAX_PC_COUNT) 
-    {
-       perror("more ptrace/pslice pc provided than the emulator can handle\n");
-       exit(0);
+       // Some validation
+       if (trace_idx >= MAX_PC_COUNT || slice_idx >= MAX_PC_COUNT)
+       {
+          perror("more ptrace/pslice pc provided than the emulator can handle\n");
+          exit(0);
+       }
+       // The first pc is the trigger delinquent load pc. Validate that
+       // both the pslice and ptrace have the same trigger.
+       assert(trace_pc[0] == slice_pc[0]);
+
+       // Find pcs in trace_pc but not in slice_pc
+       int n, m;
+       int askip_idx = 0;
+       for(n = 0; n < MAX_PC_COUNT; n++)
+       {
+          int found = 0;
+          for(m = 0; m < MAX_PC_COUNT; m++) found |= (trace_pc[n] == slice_pc[m]);
+          if (!found) askip_pc[askip_idx++] = trace_pc[n];
+       }
+
+       // handle delinquent load PC
+       env->stop_pc[env->stop_pc_idx++] = trace_pc[0];
+       DEBUG_MSG("delinquent load pc is 0x%lx", (long int) trace_pc[0]);
+       // handle ptrace PCs
+       for(n=0; n<trace_idx-1; n++)
+       {
+          env->ptrc_pc[env->ptrc_pc_idx++] = trace_pc[n];
+          DEBUG_MSG("trace_pc has 0x%lx", (long int) trace_pc[n]);
+       }
+
+       // handle skip PCs
+       for(n=0; n<askip_idx; n++)
+       {
+          env->skip_pc[env->skip_pc_idx++] = askip_pc[n];
+          DEBUG_MSG("pskip_pc has 0x%lx", (long int) askip_pc[n]);
+       }
+
+       if (env->skip_pc_idx == env->ptrc_pc_idx)
+       {
+          perror("You are skipping everything. Prefetch core will get stuck.\n");
+          exit(0);
+       }
     }
-
-    /* these 2 pcs should be equal */
-    assert(trace_pc[0] == slice_pc[0]);
-
-    /* find pcs in trace_pc but not in slice_pc */
-    int n,m;
-    int askip_idx=0;
-    for(n=0; n < MAX_PC_COUNT; n++)
-    {
-       int found = 0;
-       for(m=0;m<MAX_PC_COUNT;m++) found |= (trace_pc[n] == slice_pc[m]);
-       if (!found) askip_pc[askip_idx++] = trace_pc[n];
-    }
-
-    /* handle entry pc */
-    env->stop_pc[env->stop_pc_idx++] = trace_pc[0];
-    printf("%s entry pc is 0x%lx\n", dbgm, (long int) trace_pc[0]);
-    /* handle ptrc pc */
-    for(n=0; n<trace_idx-1; n++) 
-    {
-      env->ptrc_pc[env->ptrc_pc_idx++] = trace_pc[n];
-      printf("%s trace_pc has 0x%lx\n", dbgm, (long int) trace_pc[n]);
-    }
-    /* handle skip pc */
-    for(n=0; n<askip_idx; n++)   
-    {
-      env->skip_pc[env->skip_pc_idx++] = askip_pc[n];
-      printf("%s pskip_pc has 0x%lx\n", dbgm, (long int) askip_pc[n]);
-    }
-
-    if (env->skip_pc_idx == env->ptrc_pc_idx)
-    {
-       perror("you are skipping everything. prefetch core will stuck\n");
-       exit(0);
-    }
-    }
-
 
     if (sppslice_name) 
     {
-    int n=0;
-    sppslice = fopen(sppslice_name, "r");
-    assert(sppslice && "sppslice not provided properly");
+       int n=0;
+       sppslice = fopen(sppslice_name, "r");
+       assert(sppslice && "sppslice not provided properly");
 
-    int sppslice_pc[MAX_PC_COUNT];
-    int sppslice_idx = 0;
-    while (!feof(sppslice)) fscanf(sppslice, "%x", &sppslice_pc[sppslice_idx++]);
+       int sppslice_pc[MAX_PC_COUNT];
+       int sppslice_idx = 0;
+       while (!feof(sppslice)) fscanf(sppslice, "%x", &sppslice_pc[sppslice_idx++]);
 
-    /* handle entry pc */
-    env->stop_pc[env->stop_pc_idx++] = sppslice_pc[0];
-    printf("%s entry pc is 0x%lx\n", dbgm, (long int) sppslice_pc[0]);
+       // handle delinquent load PC
+       env->stop_pc[env->stop_pc_idx++] = sppslice_pc[0];
+       DEBUG_MSG("delinquent load PC is 0x%lx", (long int) sppslice_pc[0]);
 
-    for(n=0; n<sppslice_idx-1; n++) 
-    {
-      env->sppslice_pc[env->sppslice_pc_idx++] = sppslice_pc[n];
-      printf("%s sppslice_pc has 0x%lx\n", dbgm, (long int) sppslice_pc[n]);
+       for(n = 0; n < sppslice_idx - 1; n++)
+       {
+          env->sppslice_pc[env->sppslice_pc_idx++] = sppslice_pc[n];
+          DEBUG_MSG("sppslice_pc has 0x%lx", (long int) sppslice_pc[n]);
+       }
+       env->current_sppslice_pc_idx = env->sppslice_pc_idx - 1;
     }
-    env->current_sppslice_pc_idx = env->sppslice_pc_idx - 1;
 
-    }
+    printf("Target Delinquent Loads: ");
+    for(i = 0; i < env->stop_pc_idx; i++)
+       printf("0x%lx ", (long int) env->stop_pc[i]);
+
+    printf("\nPtrace (%u), Pslice (%u), Skipping (%u), Sppslice (%u) insns\n",
+       env->ptrc_pc_idx, env->ptrc_pc_idx - env->skip_pc_idx,
+       env->skip_pc_idx, env->sppslice_pc_idx);
 
     /* done */
     return;
@@ -1172,7 +1192,7 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                           /* the system is in trace now */
                           env->processor_state = IN_TRACE;
                           /* print  the trace enter */
-                          printf("%s stop point hit at 0x%lx\n", dbgm, (long int)GET_PC(env));
+                          DEBUG_MSG("stop point hit at 0x%lx\n", (long int)GET_PC(env));
                           //printf("%s entered in-trace mode. singlestep log in %s\n", dbgm, logname);
                        }
                     }
