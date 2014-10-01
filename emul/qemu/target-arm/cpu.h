@@ -97,6 +97,7 @@ struct arm_boot_info;
 
 #define NB_MMU_MODES 2
 
+#define MAX_ESESC_PSLICE_COUNT 10
 #define MAX_ESESC_PC_COUNT 1024
 #define MEMBYTE_BUCKET_NUM 4096
 
@@ -282,14 +283,19 @@ typedef struct CPUARMState {
     target_ulong *op_addr;
 
     /// --------------------------------------------------- ///
-    /* interested pcs, e.g. ptrace entry pc */
+    /* P-slices are resembled by a p-trace a skip-pc lists */
     /// --------------------------------------------------- ///
-    target_ulong ptrc_pc_idx;
-    target_ulong ptrc_pc[MAX_ESESC_PC_COUNT];
+    /* P-trace per delinquent load. */
+    target_ulong ptrc_pc_idx[MAX_ESESC_PSLICE_COUNT];
+    target_ulong ptrc_pc[MAX_ESESC_PSLICE_COUNT][MAX_ESESC_PC_COUNT];
+    /* Delinquent load PCs */
     target_ulong stop_pc_idx;
-    target_ulong stop_pc[MAX_ESESC_PC_COUNT];
-    target_ulong skip_pc_idx;
-    target_ulong skip_pc[MAX_ESESC_PC_COUNT];
+    int current_stop_pc_idx;
+    target_ulong stop_pc[MAX_ESESC_PSLICE_COUNT];
+    /* Skip list per delinquent load */
+    target_ulong skip_pc_idx[MAX_ESESC_PSLICE_COUNT];
+    target_ulong skip_pc[MAX_ESESC_PSLICE_COUNT][MAX_ESESC_PC_COUNT];
+    /* Single path pslice */
     target_ulong sppslice_pc_idx;
     target_ulong current_sppslice_pc_idx;
     target_ulong sppslice_pc[MAX_ESESC_PC_COUNT];

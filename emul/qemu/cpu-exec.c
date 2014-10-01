@@ -282,14 +282,20 @@ static bool qemu_entry_pc_monitor(CPUState *env)
    return found;
 }
 
+/// Check for the current delinquent load PC.
+static bool qemu_stop_pc_monitor(CPUState *env)
+{
+   return (GET_PC(env) == env->stop_pc[env->current_stop_pc_idx]);
+}
+
 /// monitor every executed instruction for ptrace exit.
 static bool qemu_exit_pc_monitor(CPUState *env)
 {
    int idx;
    int found = false;
-   for(idx=0; idx < env->ptrc_pc_idx; idx++)
+   for(idx = 0; idx < env->ptrc_pc_idx[env->current_stop_pc_idx]; idx++)
    {
-      found |= (GET_PC(env) == env->ptrc_pc[idx]); 
+      found |= (GET_PC(env) == env->ptrc_pc[env->current_stop_pc_idx][idx]);
    }
    return !found;
 }
@@ -302,9 +308,9 @@ static TranslationBlock *qemu_skip_pc_monitor(CPUState *env, TranslationBlock *t
 
    int found = false;
    int idx;
-   for(idx=0; idx < env->skip_pc_idx; idx++)
+   for(idx=0; idx < env->skip_pc_idx[env->current_stop_pc_idx]; idx++)
    {
-      found |= (GET_PC(env) == env->skip_pc[idx]); 
+      found |= (GET_PC(env) == env->skip_pc[env->current_stop_pc_idx][idx]);
    }
 
    if (found) 
@@ -321,20 +327,20 @@ static TranslationBlock *qemu_skip_pc_monitor(CPUState *env, TranslationBlock *t
 /// fetch the next pc from sppslice
 static TranslationBlock *qemu_next_pc_sppslice(CPUState *env, TranslationBlock *tb)
 {
-	/* only prefetch core is allowed to skip */
-	assert(ISPCORE(env));
+   /* only prefetch core is allowed to skip */
+   assert(ISPCORE(env));
 
-	if(env->current_sppslice_pc_idx == env->sppslice_pc_idx-1 )	// We're still in the first iteration
-		env->current_sppslice_pc_idx = 0;
-	else
-	{
-		env->current_sppslice_pc_idx++;
-	}
-	if(env->regs[15] == env->sppslice_pc[env->current_sppslice_pc_idx])
-		return tb;
+   if(env->current_sppslice_pc_idx == env->sppslice_pc_idx-1 )	// We're still in the first iteration
+      env->current_sppslice_pc_idx = 0;
+   else
+   {
+      env->current_sppslice_pc_idx++;
+   }
+   if(env->regs[15] == env->sppslice_pc[env->current_sppslice_pc_idx])
+      return tb;
 
-	env->regs[15] = env->sppslice_pc[env->current_sppslice_pc_idx];
-	return tb_find_fast(env);
+   env->regs[15] = env->sppslice_pc[env->current_sppslice_pc_idx];
+   return tb_find_fast(env);
 }
 
 /// xtrace_init_cpu_tp - initialize a CPU tracepoint strucutre.
@@ -589,7 +595,7 @@ int confidence = 3;
 bool sppsliceAllowed = true;
 
 
-//#define ENABLE_DEBUG
+#define ENABLE_DEBUG
 #ifdef ENABLE_DEBUG
 #	define DEBUG_MSG(M, ...) fprintf(stderr, "[PREFETCH-DBG] %s:%d: " M "\n", __FILE__, __LINE__, ##__VA_ARGS__)
 #else
@@ -616,7 +622,16 @@ static void qemu_cpu_create_pcore(CPUState *env)
    env->maxPrefetchDistance = 0;
    //env->PCore->fid = 1;
    prefetchAccuracy = runAheadThreshold / 2;
-   DEBUG_MSG("PCore created\n");
+
+   /* Find the corresponding delinquent load PC index */
+   int i;
+   for(i = 0; i < env->stop_pc_idx; i++)
+	   if(GET_PC(env) == env->stop_pc[i]) {
+		   env->current_stop_pc_idx = env->PCore->current_stop_pc_idx = i;
+		   break;
+	   }
+
+   DEBUG_MSG("PCore created, target PC %x, index %d\n", (unsigned int) GET_PC(env), (int) env->PCore->current_stop_pc_idx);
 }
 
 static void qemu_cpu_destroy_pcore(CPUState *env) 
@@ -663,13 +678,13 @@ static void parse_file_to_pcs(CPUState *env)
     }
 
     // Create pslice/ptrace pairs.
-    int i;
-    for(i = 0; i< pslice_count && pslice_count == ptrace_count; i++)
+    int pslice_idx;
+    for(pslice_idx = 0; pslice_idx< pslice_count && pslice_count == ptrace_count; pslice_idx++)
     {
        // Open files.
-       DEBUG_MSG("Opening ptrace %s and pslice files %s", ptrace_list[i], pslice_list[i]);
-       ptrace = fopen(ptrace_list[i], "r");
-       pslice = fopen(pslice_list[i], "r");
+       DEBUG_MSG("Opening ptrace %s and pslice files %s", ptrace_list[pslice_idx], pslice_list[pslice_idx]);
+       ptrace = fopen(ptrace_list[pslice_idx], "r");
+       pslice = fopen(pslice_list[pslice_idx], "r");
 
        assert(ptrace && pslice && "ptrace or pslice file not provided properly");
 
@@ -709,22 +724,22 @@ static void parse_file_to_pcs(CPUState *env)
 
        // handle delinquent load PC
        env->stop_pc[env->stop_pc_idx++] = trace_pc[0];
-       DEBUG_MSG("delinquent load pc is 0x%lx", (long int) trace_pc[0]);
+       //DEBUG_MSG("delinquent load pc is 0x%lx", (long int) trace_pc[0]);
        // handle ptrace PCs
        for(n=0; n<trace_idx-1; n++)
        {
-          env->ptrc_pc[env->ptrc_pc_idx++] = trace_pc[n];
-          DEBUG_MSG("trace_pc has 0x%lx", (long int) trace_pc[n]);
+          env->ptrc_pc[pslice_idx][env->ptrc_pc_idx[pslice_idx]++] = trace_pc[n];
+          //DEBUG_MSG("trace_pc has 0x%lx", (long int) trace_pc[n]);
        }
 
        // handle skip PCs
        for(n=0; n<askip_idx; n++)
        {
-          env->skip_pc[env->skip_pc_idx++] = askip_pc[n];
-          DEBUG_MSG("pskip_pc has 0x%lx", (long int) askip_pc[n]);
+          env->skip_pc[pslice_idx][env->skip_pc_idx[pslice_idx]++] = askip_pc[n];
+          //DEBUG_MSG("pskip_pc has 0x%lx", (long int) askip_pc[n]);
        }
 
-       if (env->skip_pc_idx == env->ptrc_pc_idx)
+       if (env->skip_pc_idx[pslice_idx] == env->ptrc_pc_idx[pslice_idx])
        {
           perror("You are skipping everything. Prefetch core will get stuck.\n");
           exit(0);
@@ -754,13 +769,14 @@ static void parse_file_to_pcs(CPUState *env)
     }
 
     printf("Target Delinquent Loads: ");
-    for(i = 0; i < env->stop_pc_idx; i++)
-       printf("0x%lx ", (long int) env->stop_pc[i]);
+    for(pslice_idx = 0; pslice_idx < env->stop_pc_idx; pslice_idx++)
+    {
+       printf("0x%lx ", (long int) env->stop_pc[pslice_idx]);
 
-    printf("\nPtrace (%u), Pslice (%u), Skipping (%u), Sppslice (%u) insns\n",
-       env->ptrc_pc_idx, env->ptrc_pc_idx - env->skip_pc_idx,
-       env->skip_pc_idx, env->sppslice_pc_idx);
-
+       printf("Ptrace (%u), Pslice (%u), Skipping (%u), Sppslice (%u) insns\n",
+       env->ptrc_pc_idx[pslice_idx], env->ptrc_pc_idx[pslice_idx] - env->skip_pc_idx[pslice_idx],
+       env->skip_pc_idx[pslice_idx], env->sppslice_pc_idx);
+    }
     /* done */
     return;
 }
@@ -1211,7 +1227,7 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                        /* shutdown the prefetch core */
                        qemu_cpu_destroy_pcore(env);
                        /* log it */
-                       //printf("%s exit point hit at 0x%lx\n", dbgm, (long int)GET_PC(env));
+                       DEBUG_MSG("exit point hit at 0x%lx\n", (long int)GET_PC(env));
                        //printf("%s entered post-trace mode\n", dbgm);
                        goto load_main_core;
                     }
@@ -1252,7 +1268,7 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                     /// --------------------------------------------------- ///
                     /* track the number of prefetches */
                     /// --------------------------------------------------- ///
-                    if(ISPCORE(env) && IS_INTRACE(env) && qemu_entry_pc_monitor(env))
+                    if(ISPCORE(env) && IS_INTRACE(env) && qemu_stop_pc_monitor(env))
                     {
                        env->prefetchDistance++;
                        //fprintf(stderr,"\rprefetchDist: %lld", env->prefetchDistance);
@@ -1261,7 +1277,7 @@ int cpu_exec(CPUState *env, CPUState **next_env)
                     	   env->MCore->maxPrefetchDistance = env->prefetchDistance;
                        }
                     }
-                    else if(!ISPCORE(env) && qemu_entry_pc_monitor(env))
+                    else if(!ISPCORE(env) && qemu_stop_pc_monitor(env))
                     {
                     	env->PCore->prefetchDistance--;
                     	//fprintf(stderr,"\rprefetchDist: %lld", env->PCore->prefetchDistance);
